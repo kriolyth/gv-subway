@@ -1,0 +1,30 @@
+[package]
+name = "gv-subway"
+version = "0.1.0"
+authors = ["Krio Lyth <kriolyth@gmail.com>"]
+edition = "2018"
+description = "Godville dungeon explorer"
+license = "Apache-2.0"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+nalgebra = "0.29.0"
+
+[dependencies.web-sys]
+version = "0.3"
+features = ["console"]
+
+[dev-dependencies]
+wasm-bindgen-test = "0.3"
+
+[profile.release]
+panic = "abort"
+lto = true
+
+[package.metadata.wasm-pack.profile.release]
+wasm-opt = ["-O3"]
