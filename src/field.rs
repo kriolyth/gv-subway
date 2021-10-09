@@ -68,7 +68,6 @@ impl From<Direction> for usize {
 /// - `Rightturn`: wall to the left and ahead
 /// - `Crossroads`: wall ahead
 /// - `Exit`: will exit
-#[derive(Clone, Copy, PartialEq)]
 enum Locality {
     Wall,
     Free,
@@ -237,7 +236,7 @@ impl Subway {
                     continue;
                 }
 
-                let (locality, mover_next_cells, probs) =
+                let (_, mover_next_cells, probs) =
                     self._get_locality(idx, d.opposite(), step_number);
                 for (dir, &next_idx) in mover_next_cells.iter().enumerate() {
                     if next_idx != idx {
@@ -252,7 +251,6 @@ impl Subway {
         for i in 0..FLAT_SIZE {
             self.movers.set_column(i, &next_movers.column(i));
         }
-        // self.movers = next_movers;
     }
 }
 
@@ -317,7 +315,9 @@ mod tests {
 
         assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
         assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
-        assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 1.],
+        assert_eq!(
+            subway.movers.column(126).as_slice(),
+            [0., 0., 0., 1.],
             "Movers 125-128: {:?}",
             subway.movers.fixed_columns::<4>(125).into_owned(),
         );
@@ -329,7 +329,9 @@ mod tests {
         assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
         assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
         assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 0.]);
-        assert_eq!(subway.movers.column(125).as_slice(), [0., 0., 0., 1.],
+        assert_eq!(
+            subway.movers.column(125).as_slice(),
+            [0., 0., 0., 1.],
             "Movers 125-128: {:?}",
             subway.movers.fixed_columns::<4>(125).into_owned(),
         );
@@ -341,9 +343,38 @@ mod tests {
         assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
         assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
         assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 0.]);
-        assert_eq!(subway.movers.column(125).as_slice(), [0., 0., 0., 0.],
+        assert_eq!(
+            subway.movers.column(125).as_slice(),
+            [0., 0., 0., 0.],
             "Movers 125-128: {:?}",
             subway.movers.fixed_columns::<4>(125).into_owned(),
         );
+    }
+
+    #[wasm_bindgen_test]
+    fn test_loop() {
+        let mut subway = Subway::new();
+        subway.set_field(86, Cell::Pass);
+        subway.set_field(87, Cell::Pass);
+        subway.set_field(88, Cell::Pass);
+        subway.set_field(106, Cell::Pass);
+        subway.set_field(107, Cell::Pass);
+        subway.set_field(108, Cell::Pass);
+        subway.set_field(126, Cell::Pass);
+        subway.set_field(127, Cell::Treasury);
+        subway.set_field(128, Cell::Entrance);
+        subway.init();
+        subway.step(1);
+        subway.step(2);
+        subway.step(3);
+
+        assert_eq!(subway.visited[127], 0.5);
+        subway.step(4);
+        subway.step(5);
+        subway.step(6);
+        subway.step(7);
+
+        assert!(subway.visited[127] > 0.5, "Two paths converged");
+        assert_eq!(subway.visited[107], 0.0, "Center point not visited");
     }
 }
