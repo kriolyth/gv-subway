@@ -16,12 +16,35 @@ pub enum Cell {
     Treasury = 3,
     Subtreasury = 4,
 }
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, PartialEq, Eq)]
 enum Direction {
     North = 0,
     East = 1,
     South = 2,
     West = 3,
+}
+
+impl Direction {
+    pub fn opposite(self) -> Self {
+        match self {
+            Direction::North => Direction::South,
+            Direction::East => Direction::West,
+            Direction::South => Direction::North,
+            Direction::West => Direction::East,
+        }
+    }
+}
+
+impl std::ops::Add for Direction {
+    type Output = Self;
+    fn add(self, rhs: Self) -> Self::Output {
+        match (self as usize + rhs as usize) % 4 {
+            1 => Direction::East,
+            2 => Direction::South,
+            3 => Direction::West,
+            _ => Direction::North,
+        }
+    }
 }
 
 impl From<Direction> for usize {
@@ -45,6 +68,7 @@ impl From<Direction> for usize {
 /// - `Rightturn`: wall to the left and ahead
 /// - `Crossroads`: wall ahead
 /// - `Exit`: will exit
+#[derive(Clone, Copy, PartialEq)]
 enum Locality {
     Wall,
     Free,
@@ -58,7 +82,7 @@ enum Locality {
 }
 
 pub type CellField = [Cell; FLAT_SIZE];
-pub type VisitedField = [f64; FLAT_SIZE];
+pub type VisitedField = SVector<f64, FLAT_SIZE>;
 type MoverField = SMatrix<f64, 4, FLAT_SIZE>;
 type DirVec = SVector<f64, 4>;
 type DirIndexVec = [usize; 4];
@@ -76,7 +100,7 @@ impl Subway {
     pub fn new() -> Self {
         Subway {
             field: [Cell::Wall; FLAT_SIZE],
-            visited: [0.; FLAT_SIZE],
+            visited: SVector::zeros(),
             movers: SMatrix::zeros(),
         }
     }
@@ -135,7 +159,7 @@ impl Subway {
             for i in 0..4 {
                 probs[i] = if walls[i] { 0. } else { prob }
             }
-            return (Locality::Free, [idx; 4], probs);
+            return (Locality::Free, offsets, probs);
         }
         match walls {
             [true, true, true, true] => (Locality::Wall, offsets, DirVec::zeros()),
@@ -165,7 +189,7 @@ impl Subway {
 
     /// Initialize probability matrix for first step
     pub fn init(&mut self) {
-        self.visited = [0.; FLAT_SIZE];
+        self.visited = SVector::zeros();
         self.movers = SMatrix::zeros();
         for idx in 0..FLAT_SIZE {
             let x = idx % SIZE_X;
@@ -178,10 +202,57 @@ impl Subway {
             // Set entry point probability
             if self.field[idx] == Cell::Entrance {
                 self.visited[idx] = 1.0;
-                let (_, _, move_probs) = self._get_locality(idx, Direction::South, 0);
-                self.movers.set_column(idx, &move_probs);
+                let (_, move_idx, move_probs) = self._get_locality(idx, Direction::South, 0);
+                for (dir, next_idx) in move_idx.iter().enumerate() {
+                    self.movers[(dir, *next_idx)] = move_probs[dir];
+                }
             }
         }
+    }
+
+    /// Perform a mover step
+    pub fn step(&mut self, step_number: u32) {
+        let mut next_movers = MoverField::zeros();
+        let zero_dir = DirVec::zeros();
+
+        // update probability matrix: add all movers locations,
+        // and use saturating probability (which is still not quite correct,
+        // but at least will not go over 100%)
+        let movers_sum = self.movers.row_sum_tr();
+        self.visited += movers_sum - movers_sum.component_mul(&self.visited);
+
+        // move movers (inside guard rails)
+        for idx in SIZE_X..FLAT_SIZE - SIZE_X {
+            if self.movers.column(idx).eq(&zero_dir) {
+                continue;
+            }
+            for d in [
+                Direction::North,
+                Direction::East,
+                Direction::South,
+                Direction::West,
+            ] {
+                let mover_prob = self.movers[(d as usize, idx)];
+                if mover_prob == 0. {
+                    continue;
+                }
+
+                let (locality, mover_next_cells, probs) =
+                    self._get_locality(idx, d.opposite(), step_number);
+                for (dir, &next_idx) in mover_next_cells.iter().enumerate() {
+                    if next_idx != idx {
+                        // combine movers
+                        next_movers[((dir + d as usize) % 4, next_idx)] += probs[dir] * mover_prob;
+                    }
+                }
+            }
+        }
+
+        // copy over new data
+        for i in 0..FLAT_SIZE {
+            self.movers.set_column(i, &next_movers.column(i));
+        }
+        // self.movers = next_movers;
     }
 }
 
@@ -203,23 +274,76 @@ mod tests {
     }
 
     #[wasm_bindgen_test]
+    fn test_locality() {
+        let mut subway = Subway::new();
+        subway.set_field(128, Cell::Entrance);
+        subway.set_field(127, Cell::Pass);
+        subway.set_field(126, Cell::Pass);
+        subway.set_field(125, Cell::Treasury);
+
+        subway.init();
+
+        let (_, indices, probs) = subway._get_locality(127, Direction::East, 1);
+        assert_eq!(indices, [126, 107, 128, 147]);
+        assert_eq!(probs.as_slice(), [1., 0., 0., 0.]);
+
+        let (_, indices, probs) = subway._get_locality(125, Direction::East, 1);
+        assert_eq!(indices, [125, 125, 125, 125]);
+        assert_eq!(probs.as_slice(), [0., 0., 0., 0.]);
+    }
+
+    #[wasm_bindgen_test]
     fn test_freeway() {
         let mut subway = Subway::new();
         subway.set_field(128, Cell::Entrance);
         subway.set_field(127, Cell::Pass);
-        subway.set_field(126, Cell::Treasury);
+        subway.set_field(126, Cell::Pass);
+        subway.set_field(125, Cell::Treasury);
 
         subway.init();
 
         assert_eq!(subway.get_field(128), Cell::Entrance);
+        assert_eq!(subway.visited[128], 1.);
 
-        // mover configuration: only one pointing to the west
-        let entrance_m = subway.movers.column(128);
-        let mut iter_m = entrance_m.iter();
-        assert_eq!(*iter_m.next().unwrap(), 0.);
-        assert_eq!(*iter_m.next().unwrap(), 0.);
-        assert_eq!(*iter_m.next().unwrap(), 0.);
-        assert_eq!(*iter_m.next().unwrap(), 1.);
-        assert!(iter_m.next().is_none());
+        // mover configuration: only one pointing to the west,
+        // already moved away from starting point
+        assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 1.]);
+        assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 0.]);
+
+        // do a step
+        subway.step(1);
+        assert_eq!(subway.visited[127], 1.);
+
+        assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 1.],
+            "Movers 125-128: {:?}",
+            subway.movers.fixed_columns::<4>(125).into_owned(),
+        );
+
+        // do a step
+        subway.step(2);
+        assert_eq!(subway.visited[126], 1.);
+
+        assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(125).as_slice(), [0., 0., 0., 1.],
+            "Movers 125-128: {:?}",
+            subway.movers.fixed_columns::<4>(125).into_owned(),
+        );
+
+        // do a step
+        subway.step(3);
+        assert_eq!(subway.visited[125], 1.);
+
+        assert_eq!(subway.movers.column(128).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(127).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(126).as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(subway.movers.column(125).as_slice(), [0., 0., 0., 0.],
+            "Movers 125-128: {:?}",
+            subway.movers.fixed_columns::<4>(125).into_owned(),
+        );
     }
 }
