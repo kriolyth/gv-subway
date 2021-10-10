@@ -96,6 +96,7 @@ pub struct Subway {
 
 #[wasm_bindgen]
 impl Subway {
+    #[wasm_bindgen(constructor)]
     pub fn new() -> Self {
         Subway {
             field: [Cell::Wall; FLAT_SIZE],
