@@ -1,6 +1,6 @@
 // Entry point
 
-import { App } from './app'
+import { createApp } from 'vue'
+import App from './app.vue'
 
-let app = new App();
-app.run()
+createApp(App).mount('#main')

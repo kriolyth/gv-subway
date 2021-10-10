@@ -11,12 +11,15 @@
   "author": "Krio Lyth <kriolyth@gmail.com>",
   "license": "Apache-2.0",
   "dependencies": {
-    "gv_subway": "file:../pkg"
+    "gv_subway": "file:../pkg",
+    "vue": "^3.2.20"
   },
   "devDependencies": {
+    "@vue/compiler-sfc": "^3.2.20",
     "html-webpack-plugin": "^5.3.2",
     "ts-loader": "^9.2.6",
     "typescript": "^4.4.3",
+    "vue-loader": "^16.8.1",
     "webpack": "^5.58.0",
     "webpack-cli": "^4.9.0",
     "webpack-dev-server": "^4.3.1"
