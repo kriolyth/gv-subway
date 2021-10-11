@@ -4,8 +4,7 @@
         :class="cellClass"
         @mousedown.prevent="this.$emit('touchcell', this.id)"
         @mousemove="onMove"
-    >
-        #
+    ><template v-if="cellClass.wall">#</template><template v-if="cellClass.pass">&nbsp;</template>
     </div>
 </template>
 <script lang="ts">
@@ -28,11 +27,18 @@ export default defineComponent({
             };
         },
     },
+    data() {
+        return {
+            lastEmitted: (new Date()).getTime()
+        }
+    },
     emits: ['touchcell'],
     methods: {
         onMove(evt: MouseEvent) {
-            if (evt.buttons) {
+            let nowEmitted = (new Date()).getTime()
+            if (evt.buttons && (nowEmitted - this.lastEmitted > 50)) {
                 this.$emit('touchcell', this.id)
+                this.lastEmitted = nowEmitted
             }
         }
     }

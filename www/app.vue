@@ -24,7 +24,7 @@ export default defineComponent({
         touchCell(cell_id: number) {
             if (this.cells[cell_id].cellType != Cell.Pass) {
                 this.field.set_field(cell_id, Cell.Pass);
-                this.cells[cell_id].cellType = Cell.Pass;
+                this.cells[cell_id].cellType = this.field.get_field(cell_id);
             }
         },
     },

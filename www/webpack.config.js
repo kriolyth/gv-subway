@@ -1,6 +1,7 @@
 const HtmlWebpackPlugin = require('html-webpack-plugin');
 const { VueLoaderPlugin } = require('vue-loader');
 const path = require('path');
+const { DefinePlugin } = require('webpack')
 
 
 module.exports = {
@@ -43,10 +44,14 @@ module.exports = {
     },
 
     plugins: [
+        new DefinePlugin({
+            __VUE_PROD_DEVTOOLS__: true,
+            __VUE_OPTIONS_API__: true
+        }),
         new HtmlWebpackPlugin({
             template: 'index.html'
         }),
-        new VueLoaderPlugin()
+        new VueLoaderPlugin(),
     ],
 
     experiments: {

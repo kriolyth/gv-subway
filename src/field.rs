@@ -107,7 +107,11 @@ impl Subway {
 
     /// Set cell type
     pub fn set_field(&mut self, idx: usize, cell: Cell) {
-        self.field[idx] = cell;
+        let x = idx % SIZE_X;
+        let y = idx / SIZE_X;
+        if (1..=SIZE_X-2).contains(&x) && (1..=SIZE_Y-2).contains(&y) {
+            self.field[idx] = cell;
+        }
     }
     /// Get cell type
     pub fn get_field(&self, idx: usize) -> Cell {
@@ -193,7 +197,7 @@ impl Subway {
         self.movers = SMatrix::zeros();
         for idx in 0..FLAT_SIZE {
             let x = idx % SIZE_X;
-            let y = idx % SIZE_Y;
+            let y = idx / SIZE_X;
             // Guard rails
             if x == 0 || x == SIZE_X - 1 || y == 0 || y == SIZE_Y - 1 {
                 continue;
