@@ -34,6 +34,7 @@ export default defineComponent({
             field: new Subway(),
             cells,
             drawMode: Cell.Pass,
+            specials: [-1, -1, -1],
         };
     },
     methods: {
@@ -41,6 +42,24 @@ export default defineComponent({
             if (this.cells[cell_id].cellType != this.drawMode) {
                 this.field.set_field(cell_id, this.drawMode);
                 this.cells[cell_id].cellType = this.field.get_field(cell_id);
+
+                // there can be at most one of each special cell types
+                const specialCell = [
+                    Cell.Entrance,
+                    Cell.Treasury,
+                    Cell.Subtreasury,
+                ].indexOf(this.drawMode);
+                if (specialCell >= 0) {
+                    const specialId = this.specials[specialCell];
+                    if (specialId >= 0) {
+                        // set previous to "pass" 
+                        this.field.set_field(specialId, Cell.Pass);
+                        this.cells[specialId].cellType =
+                            this.field.get_field(specialId);
+                    }
+                    // update position of the new special cell
+                    this.specials[specialCell] = cell_id;
+                }
             }
         },
         selectTool(toolId: number) {
