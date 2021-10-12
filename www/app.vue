@@ -20,7 +20,7 @@
                 type="range"
                 min="0"
                 max="100"
-                v-model.number="numSteps"
+                v-model="numSteps"
             />
             <br />Steps: {{ numSteps }}
         </div>

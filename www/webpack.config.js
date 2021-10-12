@@ -10,7 +10,7 @@ module.exports = {
         path: path.resolve(__dirname, "dist"),
         filename: "bootstrap.js", // filename referenced in index.html
     },
-    mode: 'development',
+    mode: 'production',
 
     resolve: {
         extensions: ['.ts', '.js', '.wasm', '.vue'],
@@ -45,7 +45,7 @@ module.exports = {
 
     plugins: [
         new DefinePlugin({
-            __VUE_PROD_DEVTOOLS__: true,
+            __VUE_PROD_DEVTOOLS__: false,
             __VUE_OPTIONS_API__: true
         }),
         new HtmlWebpackPlugin({

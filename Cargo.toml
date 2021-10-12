@@ -5,6 +5,7 @@ authors = ["Krio Lyth <kriolyth@gmail.com>"]
 edition = "2018"
 description = "Godville dungeon explorer"
 license = "Apache-2.0"
+repository = "https://github.com/kriolyth/gv-subway"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 

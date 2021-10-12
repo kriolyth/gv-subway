@@ -47,50 +47,37 @@ impl std::ops::Add for Direction {
     }
 }
 
-impl From<Direction> for usize {
-    fn from(dir: Direction) -> Self {
-        match dir {
-            Direction::North => 0,
-            Direction::East => 1,
-            Direction::South => 2,
-            Direction::West => 3,
-        }
-    }
-}
-
-/// Cell neighbourhood with respect to movement direction
-///
-/// - `Wall`: it is walled of or wall iself - no movement possible
-/// - `Free`: all movement directions possible
-/// - `Sac`: dead-end
-/// - `Rhs`: wall to the right
-/// - `Leftturn`: wall to the right and ahead
-/// - `Rightturn`: wall to the left and ahead
-/// - `Crossroads`: wall ahead
-/// - `Exit`: will exit
-enum Locality {
-    Wall,
-    Free,
-    Sac,
-    Rhs,
-    Lhs,
-    Leftturn,
-    Rightturn,
-    Crossroads,
-    Exit,
-}
-
+/// CellField: subway field, linearized
 pub type CellField = [Cell; FLAT_SIZE];
+
+/// VisitedField: calculated visiting probabilities
 pub type VisitedField = SVector<f64, FLAT_SIZE>;
+
+/// MoverField: "part" of initial group, 4 directions, upon entering a cell
 type MoverField = SMatrix<f64, 4, FLAT_SIZE>;
+
+/// DirVec: movement probability, 4 directions
 type DirVec = SVector<f64, 4>;
+
+/// DirIndexVec: cell index, 4 directions
 type DirIndexVec = [usize; 4];
 
 /// Game field
 #[wasm_bindgen]
 pub struct Subway {
+    /// game field
     field: CellField,
+
+    /// accumulated probabilities of visiting a cell
     visited: VisitedField,
+
+    /// movers after last calculated step
+    /// 
+    /// Entry point has initially 100% of the group and it creates
+    /// movers in all possible directions. Movers are assigned to the 
+    /// cell they will visit on next step in the direction of movement
+    /// (hence MoveField is 4xFLAT_SIZE), and have the weight according to
+    /// movement probability distribution
     movers: MoverField,
 }
 
@@ -109,7 +96,7 @@ impl Subway {
     pub fn set_field(&mut self, idx: usize, cell: Cell) {
         let x = idx % SIZE_X;
         let y = idx / SIZE_X;
-        if (1..=SIZE_X-2).contains(&x) && (1..=SIZE_Y-2).contains(&y) {
+        if (1..=SIZE_X - 2).contains(&x) && (1..=SIZE_Y - 2).contains(&y) {
             self.field[idx] = cell;
         }
     }
@@ -122,19 +109,20 @@ impl Subway {
         self.visited[idx]
     }
 
-    /// Get cell-local configuration (with move dynamics)
-    fn _get_locality(
+    /// Get possible movements (with move count dynamics)
+    fn get_movement(
         &self,
         idx: usize,
         in_direction: Direction,
         move_count: u32,
-    ) -> (Locality, DirIndexVec, DirVec) {
+    ) -> (DirIndexVec, DirVec) {
+        // Walls and exit conditions
         if self.field[idx] == Cell::Wall {
-            return (Locality::Wall, [idx; 4], DirVec::zeros());
+            return ([idx; 4], DirVec::zeros());
         } else if self.field[idx] == Cell::Entrance && move_count >= 20 {
-            return (Locality::Exit, [idx; 4], DirVec::zeros());
+            return ([idx; 4], DirVec::zeros());
         } else if self.field[idx] == Cell::Treasury || self.field[idx] == Cell::Subtreasury {
-            return (Locality::Exit, [idx; 4], DirVec::zeros());
+            return ([idx; 4], DirVec::zeros());
         }
         // cell indices for relative directions
         let indices = [
@@ -163,31 +151,21 @@ impl Subway {
             for i in 0..4 {
                 probs[i] = if walls[i] { 0. } else { prob }
             }
-            return (Locality::Free, offsets, probs);
+            return (offsets, probs);
         }
         match walls {
-            [true, true, true, true] => (Locality::Wall, offsets, DirVec::zeros()),
-            [true, true, true, false] => (Locality::Sac, offsets, DirVec::from([0., 0., 0., 1.])),
-            [true, true, false, true] => (Locality::Sac, offsets, DirVec::from([0., 0., 1., 0.])),
-            [true, false, true, true] => (Locality::Sac, offsets, DirVec::from([0., 1., 0., 0.])),
-            [false, true, true, true] => (Locality::Sac, offsets, DirVec::from([1., 0., 0., 0.])),
-            [true, true, _, false] => (Locality::Leftturn, offsets, DirVec::from([0., 0., 0., 1.])),
-            [true, false, _, true] => (
-                Locality::Rightturn,
-                offsets,
-                DirVec::from([0., 0.8, 0.2, 0.]),
-            ),
-            [true, false, _, false] => (
-                Locality::Crossroads,
-                offsets,
-                DirVec::from([0., 0.8, 0., 0.2]),
-            ),
-            [false, true, _, _] => (Locality::Rhs, offsets, DirVec::from([1., 0., 0., 0.])),
-            [false, false, _, true] => (Locality::Lhs, offsets, DirVec::from([0.85, 0.15, 0., 0.])),
-            [false, false, false, false] => {
-                (Locality::Free, offsets, DirVec::from([0.85, 0.15, 0., 0.]))
-            }
-            [false, false, true, false] => (Locality::Wall, offsets, DirVec::zeros()),
+            [true, true, true, true] => (offsets, DirVec::zeros()),
+            [true, true, true, false] => (offsets, DirVec::from([0., 0., 0., 1.])),
+            [true, true, false, true] => (offsets, DirVec::from([0., 0., 1., 0.])),
+            [true, false, true, true] => (offsets, DirVec::from([0., 1., 0., 0.])),
+            [false, true, true, true] => (offsets, DirVec::from([1., 0., 0., 0.])),
+            [true, true, _, false] => (offsets, DirVec::from([0., 0., 0., 1.])),
+            [true, false, _, true] => (offsets, DirVec::from([0., 0.8, 0.2, 0.])),
+            [true, false, _, false] => (offsets, DirVec::from([0., 0.8, 0., 0.2])),
+            [false, true, _, _] => (offsets, DirVec::from([1., 0., 0., 0.])),
+            [false, false, _, true] => (offsets, DirVec::from([0.85, 0.15, 0., 0.])),
+            [false, false, false, false] => (offsets, DirVec::from([0.85, 0.15, 0., 0.])),
+            [false, false, true, false] => (offsets, DirVec::zeros()),
         }
     }
 
@@ -206,7 +184,7 @@ impl Subway {
             // Set entry point probability
             if self.field[idx] == Cell::Entrance {
                 self.visited[idx] = 1.0;
-                let (_, move_idx, move_probs) = self._get_locality(idx, Direction::South, 0);
+                let (move_idx, move_probs) = self.get_movement(idx, Direction::South, 0);
                 for (dir, next_idx) in move_idx.iter().enumerate() {
                     self.movers[(dir, *next_idx)] = move_probs[dir];
                 }
@@ -241,8 +219,7 @@ impl Subway {
                     continue;
                 }
 
-                let (_, mover_next_cells, probs) =
-                    self._get_locality(idx, d.opposite(), step_number);
+                let (mover_next_cells, probs) = self.get_movement(idx, d.opposite(), step_number);
                 for (dir, &next_idx) in mover_next_cells.iter().enumerate() {
                     if next_idx != idx {
                         // combine movers
@@ -286,11 +263,11 @@ mod tests {
 
         subway.init();
 
-        let (_, indices, probs) = subway._get_locality(127, Direction::East, 1);
+        let (indices, probs) = subway.get_movement(127, Direction::East, 1);
         assert_eq!(indices, [126, 107, 128, 147]);
         assert_eq!(probs.as_slice(), [1., 0., 0., 0.]);
 
-        let (_, indices, probs) = subway._get_locality(125, Direction::East, 1);
+        let (indices, probs) = subway.get_movement(125, Direction::East, 1);
         assert_eq!(indices, [125, 125, 125, 125]);
         assert_eq!(probs.as_slice(), [0., 0., 0., 0.]);
     }
