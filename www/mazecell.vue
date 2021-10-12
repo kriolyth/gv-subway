@@ -2,6 +2,7 @@
     <div
         class="cell"
         :class="cellClass"
+        :style="cellColour"
         @mousedown.prevent="this.$emit('touchcell', this.id)"
         @mousemove="onMove"
     >{{ symbol }}</div>
@@ -9,6 +10,7 @@
 <script lang="ts">
 import { defineComponent } from 'vue'
 import { Cell } from '../pkg/gv_subway'
+import Rainbow from 'rainbowvis.js';
 
 export default defineComponent({
     setup() {
@@ -17,6 +19,8 @@ export default defineComponent({
     props: {
         id: Number,
         cellType: Number,
+        colourScheme: { type: Number, default: -1 },
+        colourValue: Number
     },
     computed: {
         cellClass() {
@@ -31,13 +35,21 @@ export default defineComponent({
         symbol() {
             const cell = this.$props.cellType ?? 1
             return ['#', ' ', '🚪', '💰', '📦'][cell]
+        },
+        cellColour() {
+            if (this.$props.colourScheme < 0 || this.cellType == Cell.Wall || this.colourValue == 0.) return {}
+            return {
+                backgroundColor: '#' + this.colourSchemes[this.$props.colourScheme].colourAt(100. * (this.colourValue ?? 0.))
+            }
         }
     },
     data() {
-        // const cell = this.$props.cellType ?? 1
+        const BluePink = new Rainbow()
+        BluePink.setSpectrum ('ffc0e0', 'c0c0ff', '3030a0')
+
         return {
             lastEmitted: (new Date()).getTime(),
-            // symbol: ['#', ' ', '🚪', '💰', '📦'][cell]
+            colourSchemes: [ BluePink ]
         }
     },
     emits: ['touchcell'],

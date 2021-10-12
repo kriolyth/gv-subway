@@ -12,6 +12,7 @@
   "license": "Apache-2.0",
   "dependencies": {
     "gv_subway": "file:../pkg",
+    "rainbowvis.js": "^1.0.1",
     "vue": "^3.2.20"
   },
   "devDependencies": {
