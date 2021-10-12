@@ -4,11 +4,10 @@
         :class="cellClass"
         @mousedown.prevent="this.$emit('touchcell', this.id)"
         @mousemove="onMove"
-    ><template v-if="cellClass.wall">#</template><template v-if="cellClass.pass">&nbsp;</template>
-    </div>
+    >{{ symbol }}</div>
 </template>
 <script lang="ts">
-import { defineComponent, PropType } from 'vue'
+import { defineComponent } from 'vue'
 import { Cell } from '../pkg/gv_subway'
 
 export default defineComponent({
@@ -17,19 +16,28 @@ export default defineComponent({
     },
     props: {
         id: Number,
-        cellType: Number as PropType<Cell>,
+        cellType: Number,
     },
     computed: {
         cellClass() {
             return {
                 wall: this.cellType == Cell.Wall,
                 pass: this.cellType == Cell.Pass,
+                entrance: this.cellType == Cell.Entrance,
+                treasury: this.cellType == Cell.Treasury,
+                subtreasury: this.cellType == Cell.Subtreasury,
             };
         },
+        symbol() {
+            const cell = this.$props.cellType ?? 1
+            return ['#', ' ', '🚪', '💰', '📦'][cell]
+        }
     },
     data() {
+        // const cell = this.$props.cellType ?? 1
         return {
-            lastEmitted: (new Date()).getTime()
+            lastEmitted: (new Date()).getTime(),
+            // symbol: ['#', ' ', '🚪', '💰', '📦'][cell]
         }
     },
     emits: ['touchcell'],
@@ -56,11 +64,10 @@ export default defineComponent({
         border: 1px solid silver;
         line-height: 24px;
         text-align: center;
+
+        background-color: white;
     }
     .wall {
         background-color: gray;
-    }
-    .pass {
-        background-color: white;
     }
 </style>
