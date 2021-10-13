@@ -22,7 +22,9 @@
                 max="100"
                 v-model="numSteps"
             />
-            <br />Шагов: {{ numSteps }}
+            <br />
+            <span>Шагов: {{ numSteps }}</span>
+            <span id="treasury_prob">{{ treasuryProb }} 💰</span>
         </div>
         <div id="link">
             <label
@@ -86,6 +88,11 @@ export default defineComponent({
             const subtreasury = this.specials[2];
             return `f=${result}&e=${entrance}&t=${treasury}&s=${subtreasury}`;
         },
+        treasuryProb(): string {
+            const treasury = this.specials[1];
+            if (treasury == -1) return '0.00';
+            return this.cells[treasury].prob.toFixed(2)
+        }
     },
     methods: {
         parseUrl(evt: Event) {
@@ -213,11 +220,11 @@ export default defineComponent({
             } else if (
                 this.specials[0] >= 0 &&
                 this.specials[1] >= 0 &&
-                this.numSteps > 0
+                newValue > 0
             ) {
                 // precondition ok
-                if (newValue > oldValue) {
-                    // update
+                if (false && newValue > oldValue) {
+                    // update -- numerically unstable?
                     this.recalculate(newValue - oldValue, oldValue);
                 } else {
                     // recalculate
@@ -249,6 +256,9 @@ export default defineComponent({
     }
     #numsteps {
         width: 100%;
+    }
+    #treasury_prob {
+        float: right;
     }
     #link {
         margin-top: 24px;
