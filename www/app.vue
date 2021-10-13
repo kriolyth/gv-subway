@@ -1,5 +1,5 @@
 <template>
-    <p>Placeholder keeps this place warmer</p>
+    <h3>Куда уходят бревновозы</h3>
     <div id="maze">
         <maze :width="20" :cells="cells" @touchcell="touchCell"></maze>
         <div id="drawtool">
@@ -22,7 +22,13 @@
                 max="100"
                 v-model="numSteps"
             />
-            <br />Steps: {{ numSteps }}
+            <br />Шагов: {{ numSteps }}
+        </div>
+        <div id="link">
+            <label
+                >Карта:
+                <input :value="getUrl" @change="parseUrl" />
+            </label>
         </div>
     </div>
 </template>
@@ -48,13 +54,101 @@ export default defineComponent({
             numSteps: 0,
         };
     },
-    emits: ["recalculate"],
+    computed: {
+        getUrl(): string {
+            const alphabet =
+                "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+            let result = "";
+            let rep_row = "AAA"; // repeated row (for compression)
+            for (let row = 1 * 20; row <= 18 * 20; row += 20) {
+                let s_row = "";
+                for (let col = 1; col <= 18; col += 6) {
+                    let ch =
+                        32 * +(this.cells[row + col].cellType != Cell.Wall) +
+                        16 *
+                            +(this.cells[row + col + 1].cellType != Cell.Wall) +
+                        8 * +(this.cells[row + col + 2].cellType != Cell.Wall) +
+                        4 * +(this.cells[row + col + 3].cellType != Cell.Wall) +
+                        2 * +(this.cells[row + col + 4].cellType != Cell.Wall) +
+                        +(this.cells[row + col + 5].cellType != Cell.Wall);
+                    s_row += alphabet.substr(ch, 1);
+                }
+                if (s_row == rep_row) {
+                    s_row = "~";
+                } else {
+                    rep_row = s_row;
+                }
+
+                result += s_row;
+            }
+            const entrance = this.specials[0];
+            const treasury = this.specials[1];
+            const subtreasury = this.specials[2];
+            return `f=${result}&e=${entrance}&t=${treasury}&s=${subtreasury}`;
+        },
+    },
     methods: {
+        parseUrl(evt: Event) {
+            try {
+                const request = (evt.currentTarget as HTMLInputElement).value;
+                const fields = new Map<string, string>();
+                request.split("&").forEach((s) => {
+                    let [k, v] = s.split("=");
+                    fields.set(k, v);
+                });
+
+                const alphabet =
+                    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+                let rep_row = "AAA"; // first repeated row
+                let input = fields.get("f") || "";
+                // parse field
+                for (let row = 1 * 20; row <= 18 * 20; row += 20) {
+                    let s_row = "";
+                    if (input.substr(0, 1) == "~") {
+                        s_row = rep_row;
+                        input = input.substring(1);
+                    } else {
+                        s_row = input.substr(0, 3);
+                        rep_row = s_row;
+                        input = input.substring(3);
+                    }
+                    for (let col = 1; col <= 18; col += 6) {
+                        let ch = alphabet.indexOf(s_row.substr(0, 1));
+                        s_row = s_row.substring(1);
+                        for (let bit = 0; bit < 6; bit++) {
+                            this.field.set_field(
+                                row + col + bit,
+                                ch & (1 << (5 - bit)) ? Cell.Pass : Cell.Wall
+                            );
+                        }
+                    }
+                }
+                this.specials[0] = parseInt(fields.get("e") || "-1");
+                this.specials[1] = parseInt(fields.get("t") || "-1");
+                this.specials[2] = parseInt(fields.get("s") || "-1");
+                if (this.specials[0] >= 0) {
+                    this.field.set_field(this.specials[0], Cell.Entrance);
+                }
+                if (this.specials[1] >= 0) {
+                    this.field.set_field(this.specials[1], Cell.Treasury);
+                }
+                if (this.specials[2] >= 0) {
+                    this.field.set_field(this.specials[2], Cell.Subtreasury);
+                }
+                // apply field
+                for (let cell_id = 0; cell_id < 400; cell_id++) {
+                    this.cells[cell_id].cellType =
+                        this.field.get_field(cell_id);
+                }
+            } catch (e) {
+                console.log(e);
+            }
+        },
         touchCell(cell_id: number) {
             if (this.cells[cell_id].cellType != this.drawMode) {
                 // if there was a special cell here, remove it anyway
                 if (this.specials.indexOf(cell_id) >= 0) {
-                    this.specials[this.specials.indexOf(cell_id)] = -1
+                    this.specials[this.specials.indexOf(cell_id)] = -1;
                 }
 
                 // update cell
@@ -92,8 +186,7 @@ export default defineComponent({
             this.drawMode = toolId;
         },
         recalculate(numSteps: number, updateFrom: number = 0) {
-            if (!updateFrom)
-                this.field.init();
+            if (!updateFrom) this.field.init();
             for (let i = 1; i <= numSteps; i++) {
                 this.field.step(i + updateFrom);
             }
@@ -105,6 +198,7 @@ export default defineComponent({
             }
         },
         reset() {
+            this.field.init();
             for (let cell_id = 0; cell_id < 400; cell_id++) {
                 if (this.cells[cell_id].cellType != Cell.Wall)
                     this.cells[cell_id].prob = 0;
@@ -135,12 +229,12 @@ export default defineComponent({
 });
 </script>
 <style>
+    h3 {
+        text-align: center;
+    }
     #maze {
         width: 520px;
         display: inline-block;
-    }
-    #calc {
-        margin-top: 24px;
     }
     #drawtool {
         text-align: center;
@@ -155,5 +249,13 @@ export default defineComponent({
     }
     #numsteps {
         width: 100%;
+    }
+    #link {
+        margin-top: 24px;
+    }
+
+    #link input {
+        width: 80%;
+        margin-left: 1em;
     }
 </style>
