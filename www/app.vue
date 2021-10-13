@@ -11,6 +11,7 @@
                     :cellType="toolId - 1"
                     :class="{ selected: toolId - 1 == drawMode }"
                     @click="selectTool(toolId - 1)"
+                    @touchstart="selectTool(toolId - 1)"
                 ></mazecell>
             </div>
         </div>

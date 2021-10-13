@@ -5,6 +5,8 @@
         :style="cellColour"
         @mousedown.prevent="this.$emit('touchcell', this.id)"
         @mousemove="onMove"
+        @touchstart.prevent="this.$emit('touchcell', this.id)"
+        @touchmove="onMove"
     >{{ symbol }}</div>
 </template>
 <script lang="ts">
