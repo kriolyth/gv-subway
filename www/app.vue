@@ -28,9 +28,9 @@
             <span id="treasury_prob">{{ treasuryProb }} 💰</span>
         </div>
         <div id="link">
-            <label
-                >Карта:
-                <input :value="getUrl" @change="parseUrl" />
+            <label>
+                <a :href="mapUrl">Карта</a>:
+                <input :value="encodedMap" @change="onMapLinkChange" />
             </label>
         </div>
     </div>
@@ -58,7 +58,15 @@ export default defineComponent({
         };
     },
     computed: {
-        getUrl(): string {
+        mapUrl(): string {
+            return (
+                window.location.origin +
+                window.location.pathname +
+                "?" +
+                this.encodedMap
+            );
+        },
+        encodedMap(): string {
             const alphabet =
                 "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
             let result = "";
@@ -91,19 +99,24 @@ export default defineComponent({
         },
         treasuryProb(): string {
             const treasury = this.specials[1];
-            if (treasury == -1) return '0.00';
-            return this.cells[treasury].prob.toFixed(2)
+            if (treasury == -1) return "0.00";
+            return this.cells[treasury].prob.toFixed(2);
+        },
+    },
+    created() {
+        let querystring = window.location.search.substring(1);
+        if (querystring.length > 0) {
+            this.parseMap(querystring);
         }
     },
     methods: {
-        parseUrl(evt: Event) {
+        onMapLinkChange(evt: Event) {
+            const request = (evt.currentTarget as HTMLInputElement).value;
+            this.parseMap(request);
+        },
+        parseMap(request: string) {
             try {
-                const request = (evt.currentTarget as HTMLInputElement).value;
-                const fields = new Map<string, string>();
-                request.split("&").forEach((s) => {
-                    let [k, v] = s.split("=");
-                    fields.set(k, v);
-                });
+                const fields = new URLSearchParams(request);
 
                 const alphabet =
                     "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
@@ -147,10 +160,9 @@ export default defineComponent({
                 for (let cell_id = 0; cell_id < 400; cell_id++) {
                     this.cells[cell_id].cellType =
                         this.field.get_field(cell_id);
-                    this.cells[cell_id].prob = 0.
+                    this.cells[cell_id].prob = 0;
                 }
-                if (this.numSteps > 0)
-                    this.recalculate(this.numSteps)
+                if (this.numSteps > 0) this.recalculate(this.numSteps);
             } catch (e) {
                 console.log(e);
             }
