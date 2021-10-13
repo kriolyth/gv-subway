@@ -146,7 +146,10 @@ export default defineComponent({
                 for (let cell_id = 0; cell_id < 400; cell_id++) {
                     this.cells[cell_id].cellType =
                         this.field.get_field(cell_id);
+                    this.cells[cell_id].prob = 0.
                 }
+                if (this.numSteps > 0)
+                    this.recalculate(this.numSteps)
             } catch (e) {
                 console.log(e);
             }
@@ -207,8 +210,7 @@ export default defineComponent({
         reset() {
             this.field.init();
             for (let cell_id = 0; cell_id < 400; cell_id++) {
-                if (this.cells[cell_id].cellType != Cell.Wall)
-                    this.cells[cell_id].prob = 0;
+                this.cells[cell_id].prob = 0;
             }
         },
     },

@@ -197,11 +197,11 @@ impl Subway {
         let mut next_movers = MoverField::zeros();
         let zero_dir = DirVec::zeros();
 
-        // update probability matrix: add all movers locations,
-        // and use saturating probability (which is still not quite correct,
-        // but at least will not go over 100%)
+        // update probability matrix: add all movers locations.
+        // This will go over 100% for cells visited multiple times,
+        // but will have correct counts for exit points
         let movers_sum = self.movers.row_sum_tr();
-        self.visited += movers_sum - movers_sum.component_mul(&self.visited);
+        self.visited += movers_sum;
 
         // move movers (inside guard rails)
         for idx in SIZE_X..FLAT_SIZE - SIZE_X {
