@@ -16,6 +16,7 @@ pub enum Cell {
     Treasury = 3,
     Subtreasury = 4,
 }
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Direction {
     North = 0,
@@ -72,13 +73,18 @@ pub struct Subway {
     visited: VisitedField,
 
     /// movers after last calculated step
-    /// 
+    ///
     /// Entry point has initially 100% of the group and it creates
-    /// movers in all possible directions. Movers are assigned to the 
+    /// movers in all possible directions. Movers are assigned to the
     /// cell they will visit on next step in the direction of movement
     /// (hence MoveField is 4xFLAT_SIZE), and have the weight according to
     /// movement probability distribution
     movers: MoverField,
+}
+impl Default for Subway {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 #[wasm_bindgen]
@@ -90,6 +96,10 @@ impl Subway {
             visited: SVector::zeros(),
             movers: SMatrix::zeros(),
         }
+    }
+
+    pub fn to_idx(&self, row: usize, col: usize) -> usize {
+        row * SIZE_X + col
     }
 
     /// Set cell type
@@ -117,11 +127,10 @@ impl Subway {
         move_count: u32,
     ) -> (DirIndexVec, DirVec) {
         // Walls and exit conditions
-        if self.field[idx] == Cell::Wall {
-            return ([idx; 4], DirVec::zeros());
-        } else if self.field[idx] == Cell::Entrance && move_count >= 20 {
-            return ([idx; 4], DirVec::zeros());
-        } else if self.field[idx] == Cell::Treasury || self.field[idx] == Cell::Subtreasury {
+        if (self.field[idx] == Cell::Wall)
+            || (self.field[idx] == Cell::Entrance && move_count >= 20)
+            || (self.field[idx] == Cell::Treasury || self.field[idx] == Cell::Subtreasury)
+        {
             return ([idx; 4], DirVec::zeros());
         }
         // cell indices for relative directions
@@ -233,6 +242,13 @@ impl Subway {
         for i in 0..FLAT_SIZE {
             self.movers.set_column(i, &next_movers.column(i));
         }
+    }
+
+    /// Reset the field to initial state
+    pub fn reset(&mut self) {
+        self.field = [Cell::Wall; FLAT_SIZE];
+        self.visited = SVector::zeros();
+        self.movers = SMatrix::zeros();
     }
 }
 
