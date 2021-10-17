@@ -5,8 +5,8 @@
     </p>
     <p>{{ processingState }}</p>
 
-    <img id="paste" :class="{'debug': debugOutput}" ref="pasta" />
-    <canvas id="pixels" :class="{'debug': debugOutput}" ref="pixels"></canvas>
+    <img id="paste" :class="{ debug: debugOutput }" ref="pasta" />
+    <canvas id="pixels" :class="{ debug: debugOutput }" ref="pixels"></canvas>
 </template>
 <script lang="ts">
 import { defineComponent } from "vue";
@@ -15,10 +15,10 @@ import { ImageProcessor } from "../pkg/gv_subway";
 export default defineComponent({
     setup() {},
     data() {
-        const fields = new URLSearchParams(window.location.search.substring(1));        
+        const fields = new URLSearchParams(window.location.search.substring(1));
         return {
             processingState: "",
-            debugOutput: fields.get('debug') == '1'
+            debugOutput: fields.get("debug") == "1",
         };
     },
     emits: ["haveMaze"],
@@ -39,12 +39,16 @@ export default defineComponent({
         let pasta = this.$refs.pasta as HTMLImageElement;
         let pixxa = this.$refs.pixels as HTMLCanvasElement;
         pasta.addEventListener("load", function (_evt: Event) {
-            pixxa.width = pasta.width;
-            pixxa.height = pasta.height;
-            pixxa.getContext("2d")?.drawImage(pasta, 0, 0);
+            let scale = 1.0;
+            if (pixxa.width > 600) scale = 0.5;
+            pixxa.width = pasta.width * scale;
+            pixxa.height = pasta.height * scale;
+            pixxa
+                .getContext("2d")
+                ?.drawImage(pasta, 0, 0, pixxa.width, pixxa.height);
             let imageData = pixxa
                 .getContext("2d")
-                ?.getImageData(0, 0, pasta.width, pasta.height);
+                ?.getImageData(0, 0, pixxa.width, pixxa.height);
             if (imageData) {
                 vm.processingState = "Загружаем...";
                 try {
@@ -60,16 +64,17 @@ export default defineComponent({
                         vm.$emit("haveMaze", maze);
 
                         processor.debug_draw(maze);
-                        let backpixels = processor.get_image_data();
-                        let newImage = new ImageData(
-                            backpixels,
-                            pasta.width,
-                            pasta.height
-                        );
-                        pixxa.getContext("2d")?.putImageData(newImage, 0, 0);
                     } else {
-                        vm.processingState = "Загрузить схему подземки не удалось";
+                        vm.processingState =
+                            "Загрузить схему подземки не удалось";
                     }
+                    let backpixels = processor.get_image_data();
+                    let newImage = new ImageData(
+                        backpixels,
+                        pasta.width,
+                        pasta.height
+                    );
+                    pixxa.getContext("2d")?.putImageData(newImage, 0, 0);
                 } catch (e) {
                     alert(e);
                     vm.processingState = "";
@@ -106,10 +111,12 @@ export default defineComponent({
 });
 </script>
 <style>
-    #paste, #pixels {
+    #paste,
+    #pixels {
         display: none;
     }
-    #paste.debug, #pixels.debug {
+    #paste.debug,
+    #pixels.debug {
         display: block;
         border: 1px dotted midnightblue;
     }
