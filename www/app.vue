@@ -34,15 +34,17 @@
             </label>
         </div>
     </div>
+    <imagePaste @haveMaze="onHaveMaze"></imagePaste>
 </template>
 <script lang="ts">
 import { defineComponent } from "vue";
-import { Subway, Cell } from "../pkg/gv_subway";
+import { Subway, Cell, Maze } from "../pkg/gv_subway";
 import maze from "./maze.vue";
 import mazecell from "./mazecell.vue";
+import imagePaste from "./image-paste.vue"
 
 export default defineComponent({
-    components: { maze, mazecell },
+    components: { maze, mazecell, imagePaste },
     data() {
         let wall_cell = { cellType: Cell.Wall, prob: 0 };
         let cells = new Array(400);
@@ -226,6 +228,12 @@ export default defineComponent({
                 this.cells[cell_id].prob = 0;
             }
         },
+        onHaveMaze(maze: Maze) {
+            maze.apply_to_subway(this.field);
+            for (let cell_id = 0; cell_id < 400; cell_id++) {
+                this.cells[cell_id].cellType = this.field.get_field(cell_id)
+            }
+        }
     },
     watch: {
         numSteps(newValue, oldValue) {
