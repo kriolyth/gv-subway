@@ -233,6 +233,7 @@ export default defineComponent({
             for (let cell_id = 0; cell_id < 400; cell_id++) {
                 this.cells[cell_id].cellType = this.field.get_field(cell_id)
             }
+            this.specials = [-1, -1, -1];
         }
     },
     watch: {

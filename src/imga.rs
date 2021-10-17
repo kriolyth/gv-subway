@@ -82,19 +82,33 @@ impl GridPeriod {
     /// Expand period count to the maximum possible
     pub fn expand(&mut self, col: &DVector<u32>) {
         let max_count = (col.nrows() - self.offset - 1) / (self.period + 1) + 1;
-        if self.count == max_count {
-            return;
-        }
 
         let grid_avg = col
             .rows_with_step(self.offset, self.count, self.period)
             .sum()
             / (self.count as u32);
-        self.count = col
-            .rows_with_step(self.offset, max_count, self.period)
+
+        if self.count < max_count {
+            // expand up to max_count
+            self.count = col
+                .rows_with_step(self.offset, max_count, self.period)
+                .iter()
+                .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) < 20)
+                .count();
+        }
+
+        if self.count == 0 {
+            return;
+        }
+        // verify that between grid cells difference is higher
+        let mid_count = col
+            .rows_with_step(self.offset + self.period / 2, self.count - 1, self.period)
             .iter()
-            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) < 20)
+            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > 10)
             .count();
+        if mid_count < self.count - 1 {
+            self.count = mid_count + 1
+        }
     }
 }
 
@@ -204,6 +218,7 @@ impl ImageProcessor {
                     };
                     // minimum found - now adjust the grid to capture all of the lines
                     grid.expand(&cols);
+
                     // After expansion grid may be unusable if rows are not alike,
                     // so we need another check
                     if grid.count > 0
@@ -281,29 +296,26 @@ impl ImageProcessor {
     pub fn detect_maze(&self, grid: &Grid) -> Maze {
         let mut cells = Vec::with_capacity(grid.col_count * grid.row_count);
         if grid.size == 0 {
-            return Maze {
-                grid: *grid,
-                cells,
-            };
+            return Maze { grid: *grid, cells };
         }
 
         // Grab top left cell - this will be a wall
         let wall_cell = self.pixels.slice(
-            (grid.row_offset + 1, grid.col_offset + 1),
-            (grid.size - 1, grid.size - 1),
+            (grid.row_offset + 2, grid.col_offset + 2),
+            (grid.size - 2, grid.size - 2),
         );
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
             for col in 0..grid.col_count {
                 let cell = self.pixels.slice(
                     (
-                        grid.row_offset + row * grid.size + 1,
-                        grid.col_offset + col * grid.size + 1,
+                        grid.row_offset + row * grid.size + 2,
+                        grid.col_offset + col * grid.size + 2,
                     ),
-                    (grid.size - 1, grid.size - 1),
+                    (grid.size - 2, grid.size - 2),
                 );
                 let diff = ImageProcessor::compare(&wall_cell, &cell);
-                if diff < (grid.size as u32 * grid.size as u32) {
+                if diff < (3 * grid.size as u32 * grid.size as u32) {
                     // wall
                     cells.push(Cell::Wall);
                 } else {
@@ -312,10 +324,7 @@ impl ImageProcessor {
             }
         }
 
-        Maze {
-            grid: *grid,
-            cells,
-        }
+        Maze { grid: *grid, cells }
     }
 
     /// Debug draw: paint walls black
@@ -335,7 +344,6 @@ impl ImageProcessor {
             }
         }
     }
-
 }
 
 #[cfg(test)]

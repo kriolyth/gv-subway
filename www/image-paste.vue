@@ -40,7 +40,7 @@ export default defineComponent({
         let pixxa = this.$refs.pixels as HTMLCanvasElement;
         pasta.addEventListener("load", function (_evt: Event) {
             let scale = 1.0;
-            if (pixxa.width > 600) scale = 0.5;
+            if (pasta.width > 600) scale = 0.5;
             pixxa.width = pasta.width * scale;
             pixxa.height = pasta.height * scale;
             pixxa
@@ -71,8 +71,8 @@ export default defineComponent({
                     let backpixels = processor.get_image_data();
                     let newImage = new ImageData(
                         backpixels,
-                        pasta.width,
-                        pasta.height
+                        pixxa.width,
+                        pixxa.height
                     );
                     pixxa.getContext("2d")?.putImageData(newImage, 0, 0);
                 } catch (e) {
