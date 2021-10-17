@@ -20,6 +20,7 @@ pub struct Grid {
     col_count: usize,
 }
 
+/// Encapsulates detected maze for passing around
 #[wasm_bindgen]
 pub struct Maze {
     grid: Grid,
@@ -28,10 +29,12 @@ pub struct Maze {
 
 #[wasm_bindgen]
 impl Maze {
+    /// Apply detected maze to the subway field
     pub fn apply_to_subway(&self, subway: &mut Subway) {
         let subway_row_offset = (20 - self.grid.row_count) / 2;
         let subway_col_offset = (20 - self.grid.col_count) / 2;
 
+        subway.reset();
         for row in 0..self.grid.row_count {
             for col in 0..self.grid.col_count {
                 subway.set_field(
@@ -42,6 +45,7 @@ impl Maze {
         }
     }
 
+    /// Tell if the structure has valid data
     pub fn is_valid(&self) -> bool {
         self.grid.size > 0
     }
@@ -314,10 +318,10 @@ impl ImageProcessor {
         }
     }
 
+    /// Debug draw: paint walls black
     pub fn debug_draw(&mut self, maze: &Maze) {
         for row in 0..maze.grid.row_count {
             for col in 0..maze.grid.col_count {
-                // debug draw
                 let mut cell = self.pixels.slice_mut(
                     (
                         maze.grid.row_offset + row * maze.grid.size + 1,
@@ -326,7 +330,7 @@ impl ImageProcessor {
                     (maze.grid.size - 1, maze.grid.size - 1),
                 );
                 if maze.cells[row * maze.grid.col_count + col] == Cell::Wall {
-                    cell.fill(0); // debug draw
+                    cell.fill(0);
                 }
             }
         }
@@ -371,14 +375,14 @@ mod tests {
         }
         let img = ImageProcessor::new(2, 2, arr);
         assert_eq!(img.pixels[(0, 0)], 3);
-        assert_eq!(img.pixels[(1, 0)], 15);
-        assert_eq!(img.pixels[(0, 1)], 27);
+        assert_eq!(img.pixels[(0, 1)], 15);
+        assert_eq!(img.pixels[(1, 0)], 27);
         assert_eq!(img.pixels[(1, 1)], 39);
 
         let arr = img.get_image_data();
         assert_eq!(
             arr.to_vec(),
-            vec![0, 0, 0, 255, 3, 3, 3, 255, 6, 6, 6, 255, 9, 9, 9, 255]
+            vec![1, 1, 1, 255, 5, 5, 5, 255, 9, 9, 9, 255, 13, 13, 13, 255]
         );
     }
 }

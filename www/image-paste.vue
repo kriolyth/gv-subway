@@ -3,9 +3,10 @@
         Вставьте изображение или выберите файл для загрузки:
         <input type="file" ref="imgFile" />
     </p>
+    <p>{{ processingState }}</p>
 
-    <img id="paste" ref="pasta" />
-    <canvas id="pixels" ref="pixels"></canvas>
+    <img id="paste" :class="{'debug': debugOutput}" ref="pasta" />
+    <canvas id="pixels" :class="{'debug': debugOutput}" ref="pixels"></canvas>
 </template>
 <script lang="ts">
 import { defineComponent } from "vue";
@@ -13,6 +14,13 @@ import { ImageProcessor } from "../pkg/gv_subway";
 
 export default defineComponent({
     setup() {},
+    data() {
+        const fields = new URLSearchParams(window.location.search.substring(1));        
+        return {
+            processingState: "",
+            debugOutput: fields.get('debug') == '1'
+        };
+    },
     emits: ["haveMaze"],
     mounted() {
         let vm = this; // this vue/model reference
@@ -38,15 +46,33 @@ export default defineComponent({
                 .getContext("2d")
                 ?.getImageData(0, 0, pasta.width, pasta.height);
             if (imageData) {
-                let processor = new ImageProcessor(imageData.width, imageData.height, imageData.data)
-                let maze = processor.detect_maze(processor.detect_grid());
-                if (maze.is_valid()) {                    
-                    vm.$emit("haveMaze", maze);
+                vm.processingState = "Загружаем...";
+                try {
+                    let processor = new ImageProcessor(
+                        imageData.width,
+                        imageData.height,
+                        imageData.data
+                    );
+                    vm.processingState = "Проверяем...";
+                    let maze = processor.detect_maze(processor.detect_grid());
+                    if (maze.is_valid()) {
+                        vm.processingState = "Схема получена";
+                        vm.$emit("haveMaze", maze);
 
-                    processor.debug_draw(maze);
-                    let backpixels = processor.get_image_data();
-                    let newImage = new ImageData(backpixels, pasta.width,pasta.height);
-                    pixxa.getContext("2d")?.putImageData(newImage, 0, 0)
+                        processor.debug_draw(maze);
+                        let backpixels = processor.get_image_data();
+                        let newImage = new ImageData(
+                            backpixels,
+                            pasta.width,
+                            pasta.height
+                        );
+                        pixxa.getContext("2d")?.putImageData(newImage, 0, 0);
+                    } else {
+                        vm.processingState = "Загрузить схему подземки не удалось";
+                    }
+                } catch (e) {
+                    alert(e);
+                    vm.processingState = "";
                 }
             }
         });
@@ -80,10 +106,11 @@ export default defineComponent({
 });
 </script>
 <style>
-    #paste {
-display: none;
-    }
-    #pixels {
+    #paste, #pixels {
         display: none;
+    }
+    #paste.debug, #pixels.debug {
+        display: block;
+        border: 1px dotted midnightblue;
     }
 </style>
