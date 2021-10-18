@@ -321,7 +321,7 @@ impl ImageProcessor {
                     (grid.size - 2, grid.size - 2),
                 );
                 let diff = ImageProcessor::compare(&wall_cell, &cell);
-                if diff < (3 * grid.size as u32 * grid.size as u32) {
+                if diff < (10 * grid.size as u32 * grid.size as u32) {
                     // wall
                     cells.push(Cell::Wall);
                 } else {
