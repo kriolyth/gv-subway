@@ -104,7 +104,7 @@ impl GridPeriod {
         let mid_count = col
             .rows_with_step(self.offset + self.period / 2, self.count - 1, self.period)
             .iter()
-            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > 10)
+            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > 20)
             .count();
         if mid_count < self.count - 1 {
             self.count = mid_count + 1
@@ -191,23 +191,29 @@ impl ImageProcessor {
         // end result: detected grid with largest number of lines
         let mut largest_grid: Option<GridPeriod> = None;
 
-        // Iterate over acceptable periods - actual period depend on
-        // screen resolution and scaling. Also note that "period" used for
-        // traversing the matrix is the size of the "gap",
-        // therefore occasional +1's are needed
-        for period in period_range {
-            // There should be at least 12 rows. We can search for less, but searching
-            // for more cuts off earlier.
-            if cols.len() / (period + 1) < INITIAL_SEEK_SIZE {
-                // period is too large - the maze won't fit, can work with what we have
-                break;
-            }
-            for offset in 0..(cols.len() - INITIAL_SEEK_SIZE * (period + 1)) {
-                // Each period may start at a different offset - so we go over offsets too
+        // Each period may start at a different offset - so we go over offsets too
+        // We first pick offsets that are on the other side of average
+        for (offset, _) in cols
+            .iter()
+            .enumerate()
+            .take(cols.len() - INITIAL_SEEK_SIZE * (period_range.start + 1))
+            .filter(|(_index, &value)| (value < avg) ^ dark_mode)
+        {
+            // Iterate over acceptable periods - actual period depend on
+            // screen resolution and scaling. Also note that "period" used for
+            // traversing the matrix is the size of the "gap",
+            // therefore occasional +1's are needed
+            for period in period_range.start..period_range.end {
+                // There should be at least 12 rows. We can search for less, but searching
+                // for more cuts off earlier.
+                if (cols.len() - offset) / (period + 1) < INITIAL_SEEK_SIZE {
+                    // period is too large - the maze won't fit, can work with what we have
+                    break;
+                }
+                // make sure all rows within period are darker/brighter
                 if cols
                     .fixed_rows_with_step::<INITIAL_SEEK_SIZE>(offset, period)
                     .iter()
-                    // search for darker/brighter rows
                     .all(|&value| (value < avg) ^ dark_mode)
                 {
                     // all hit - add the result
