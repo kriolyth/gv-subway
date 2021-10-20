@@ -305,20 +305,26 @@ impl ImageProcessor {
             return Maze { grid: *grid, cells };
         }
 
+        // On larger cell sizes grids have thicker borders,
+        // but we can approximately pick how much to inset into the cell square
+        let inset = 1 + grid.size / 15;
+
         // Grab top left cell - this will be a wall
         let wall_cell = self.pixels.slice(
-            (grid.row_offset + 2, grid.col_offset + 2),
-            (grid.size - 2, grid.size - 2),
+            (grid.row_offset + inset, grid.col_offset + inset),
+            (grid.size - inset * 2, grid.size - inset * 2),
         );
+        let mut entry_candidate: (usize, u32) = (0, 1000);
+        let mut exit_candidate: usize = 0;
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
             for col in 0..grid.col_count {
                 let cell = self.pixels.slice(
                     (
-                        grid.row_offset + row * grid.size + 2,
-                        grid.col_offset + col * grid.size + 2,
+                        grid.row_offset + row * grid.size + inset,
+                        grid.col_offset + col * grid.size + inset,
                     ),
-                    (grid.size - 2, grid.size - 2),
+                    (grid.size - inset * 2, grid.size - inset * 2),
                 );
                 let diff = ImageProcessor::compare(&wall_cell, &cell);
                 if diff < (10 * grid.size as u32 * grid.size as u32) {
@@ -326,8 +332,53 @@ impl ImageProcessor {
                     cells.push(Cell::Wall);
                 } else {
                     cells.push(Cell::Pass);
+                    // we'll try to detect special cells by their very special
+                    // characteristics
+                    let cell_avg = cell.sum() / (cell.ncols() as u32 * cell.nrows() as u32);
+                    let cell_max = cell.max();
+                    let cell_min = cell.min();
+                    if cell_max > cell_min + 100 {
+                        // Special cells have icons, so their min/max has quite some difference.
+                        // Of these special cells two are most interesting: entry and exit
+
+                        // Glyph for entry point has thinner lines and its outlook is
+                        // less dense. So the characteristic to track is the difference
+                        // between min and max - the closest gets "entry" mark.
+                        if cell_max - cell_min < entry_candidate.1 {
+                            entry_candidate = (cells.len() - 1, cell_max - cell_min);
+                        }
+
+                        // Treasury glyph under some calculations below has more than
+                        // two "sign changes", meaning that the number of dark pixels
+                        // in a column is below an average threshold.
+                        // This is the only glyph that shows such characteristic,
+                        // also in different resolutions.
+                        let x_proj = cell.compress_rows(|col| {
+                            col.iter().filter(|&&value| value < cell_avg).count() as u32
+                        });
+                        let x_proj_avg = x_proj.sum() / x_proj.ncols() as u32;
+                        let oscillations =
+                            x_proj.iter().fold((0u32, x_proj[0] > x_proj_avg), |mut accum, &value| {
+                                if accum.1 != (value > x_proj_avg) {
+                                    accum.0 += 1;
+                                    accum.1 = !accum.1;
+                                }
+                                accum
+                            });
+                        if oscillations.0 > 2 {
+                            exit_candidate = cells.len() - 1;
+                        }
+                    }
                 }
             }
+        }
+
+        // Apply found candidates to map
+        if entry_candidate.0 > 0 {
+            cells[entry_candidate.0] = Cell::Entrance;
+        }
+        if exit_candidate > 0 {
+            cells[exit_candidate] = Cell::Treasury;
         }
 
         Maze { grid: *grid, cells }

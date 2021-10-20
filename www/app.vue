@@ -230,10 +230,19 @@ export default defineComponent({
         },
         onHaveMaze(maze: Maze) {
             maze.apply_to_subway(this.field);
+            this.specials = [-1, -1, -1];
             for (let cell_id = 0; cell_id < 400; cell_id++) {
                 this.cells[cell_id].cellType = this.field.get_field(cell_id)
+                const specialIndex = [
+                    Cell.Entrance,
+                    Cell.Treasury,
+                    Cell.Subtreasury,
+                ].indexOf(this.cells[cell_id].cellType);
+                if (specialIndex >= 0) {
+                    this.specials[specialIndex] = cell_id
+                }
             }
-            this.specials = [-1, -1, -1];
+            if (this.numSteps > 0) this.recalculate(this.numSteps);
         }
     },
     watch: {
