@@ -40,7 +40,7 @@ export default defineComponent({
         let pixxa = this.$refs.pixels as HTMLCanvasElement;
         pasta.addEventListener("load", function (_evt: Event) {
             let scale = 1.0;
-            if (pasta.width > 600) scale = 0.5;
+            if (pasta.width > 800) scale = 0.5;
             pixxa.width = pasta.width * scale;
             pixxa.height = pasta.height * scale;
             pixxa

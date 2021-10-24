@@ -339,7 +339,7 @@ impl ImageProcessor {
                     let cell_min = cell.min();
                     if cell_max > cell_min + 100 {
                         // Special cells have icons, so their min/max has quite some difference.
-                        // Of these special cells two are most interesting: entry and exit
+                        // Of these special cells two are most interesting: entry and treasury.
 
                         // Glyph for entry point has thinner lines and its outlook is
                         // less dense. So the characteristic to track is the difference
@@ -348,15 +348,18 @@ impl ImageProcessor {
                             entry_candidate = (cells.len() - 1, cell_max - cell_min);
                         }
 
-                        // Treasury glyph under some calculations below has more than
-                        // two "sign changes", meaning that the number of dark pixels
-                        // in a column is below an average threshold.
+                        // Treasury glyph projection on horizontal axis has more than
+                        // two "sign changes" (going above or below average number of glyph pixels
+                        // per column).
                         // This is the only glyph that shows such characteristic,
                         // also in different resolutions.
                         let x_proj = cell.compress_rows(|col| {
                             col.iter().filter(|&&value| value < cell_avg).count() as u32
                         });
-                        let x_proj_avg = x_proj.sum() / x_proj.ncols() as u32;
+                        // A small nudge of "105/100" is applied after some 
+                        // dark mode jpeg-compressed images were found that, probably due to
+                        // compression artifacts, result in a non-descriptive average
+                        let x_proj_avg = x_proj.sum() * 105 / (x_proj.ncols() as u32 * 100);
                         let oscillations =
                             x_proj.iter().fold((0u32, x_proj[0] > x_proj_avg), |mut accum, &value| {
                                 if accum.1 != (value > x_proj_avg) {
