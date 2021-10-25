@@ -91,6 +91,7 @@ export default defineComponent({
     }
     .cell.pass {
         font-size: 6pt;
+        line-height: 28px;
     }
     .cell.pass.inverted {
         color: white;
