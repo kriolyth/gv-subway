@@ -22,13 +22,14 @@ export default defineComponent({
         id: Number,
         cellType: Number,
         colourScheme: { type: Number, default: -1 },
-        colourValue: Number
+        cellValue: Number
     },
     computed: {
         cellClass() {
             return {
                 wall: this.cellType == Cell.Wall,
                 pass: this.cellType == Cell.Pass,
+                inverted: (this.$props.cellValue ?? 0) > 0.6,
                 entrance: this.cellType == Cell.Entrance,
                 treasury: this.cellType == Cell.Treasury,
                 subtreasury: this.cellType == Cell.Subtreasury,
@@ -36,12 +37,16 @@ export default defineComponent({
         },
         symbol() {
             const cell = this.$props.cellType ?? 1
-            return ['#', ' ', '🚪', '💰', '📦'][cell]
+            if (cell == 1 && this.$props.cellValue) {
+                return this.$props.cellValue.toFixed(3).replace(/^0/, '').substr(0, 4)
+            } else {
+                return ['#', ' ', '🚪', '💰', '📦'][cell]
+            }
         },
         cellColour() {
-            if (this.$props.colourScheme < 0 || this.cellType == Cell.Wall || this.colourValue == 0.) return {}
+            if (this.$props.colourScheme < 0 || this.cellType == Cell.Wall || this.cellValue == 0.) return {}
             return {
-                backgroundColor: '#' + this.colourSchemes[this.$props.colourScheme].colourAt(100. * (this.colourValue ?? 0.))
+                backgroundColor: '#' + this.colourSchemes[this.$props.colourScheme].colourAt(100. * (this.cellValue ?? 0.))
             }
         }
     },
@@ -83,5 +88,11 @@ export default defineComponent({
     }
     .wall {
         background-color: gray;
+    }
+    .cell.pass {
+        font-size: 6pt;
+    }
+    .cell.pass.inverted {
+        color: white;
     }
 </style>

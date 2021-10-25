@@ -2,7 +2,7 @@
     <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
         <mazecell
             :colourScheme="0"
-            :colourValue="cell.prob"
+            :cellValue="cell.prob"
             :cellType="cell.cellType"
             :id="index + rowIndex * this.rowWidth"
             v-for="(cell, index) in row"
