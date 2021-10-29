@@ -81,6 +81,7 @@ struct GridPeriod {
 impl GridPeriod {
     /// Expand period count to the maximum possible
     pub fn expand(&mut self, col: &DVector<u32>) {
+        const GRID_SENSITIVITY: u32 = 15;
         let max_count = (col.nrows() - self.offset - 1) / (self.period + 1) + 1;
 
         let grid_avg = col
@@ -93,7 +94,7 @@ impl GridPeriod {
             self.count = col
                 .rows_with_step(self.offset, max_count, self.period)
                 .iter()
-                .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) < 20)
+                .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) < GRID_SENSITIVITY)
                 .count();
         }
 
@@ -104,12 +105,19 @@ impl GridPeriod {
         let mid_count = col
             .rows_with_step(self.offset + self.period / 2, self.count - 1, self.period)
             .iter()
-            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > 20)
+            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > GRID_SENSITIVITY)
             .count();
         if mid_count < self.count - 1 {
             self.count = mid_count + 1
         }
     }
+}
+
+struct SymbolBox {
+    left: usize,
+    top: usize,
+    width: usize,
+    height: usize,
 }
 
 #[wasm_bindgen]
@@ -126,7 +134,8 @@ impl ImageProcessor {
             // convert to grayscale without divide step
             pixels: img_vector
                 .cast::<u32>()
-                .row_sum()
+                .compress_rows(|col| col.max() * 3)
+                // .row_sum()
                 // data is given by scan lines, but nalgebra matrices are column-major,
                 // so we reshape into a transposed matrix to match the source
                 // (may remove for production)
@@ -281,6 +290,38 @@ impl ImageProcessor {
         })
     }
 
+    /// Find minimal box encompassing a symbol in the cell. Returns (left, top, width, height)
+    fn get_symbol_box(cell: &DMatrixSlice<u32>, bg_value: u32, midpoint: u32) -> SymbolBox {
+        let is_bg = |value| {
+            (bg_value <= value && value <= midpoint) || (midpoint <= value && value <= bg_value)
+        };
+        let top = cell
+            .row_iter()
+            .take_while(|row| row.column_iter().all(|value| is_bg(value[0])))
+            .count();
+        let height = cell
+            .row_iter()
+            .skip(top)
+            .take_while(|row| !row.column_iter().all(|value| is_bg(value[0])))
+            .count();
+        let left = cell
+            .column_iter()
+            .take_while(|col| col.row_iter().all(|value| is_bg(value[0])))
+            .count();
+        let width = cell
+            .column_iter()
+            .skip(left)
+            .take_while(|col| !col.row_iter().all(|value| is_bg(value[0])))
+            .count();
+
+        SymbolBox {
+            left,
+            top,
+            width,
+            height,
+        }
+    }
+
     /// Find a grid structure in given screenshot
     pub fn detect_grid(&self) -> Grid {
         // First we try to detect the grid on the screenshot
@@ -315,7 +356,7 @@ impl ImageProcessor {
             (grid.size - inset * 2, grid.size - inset * 2),
         );
         let mut entry_candidate: (usize, u32) = (0, 1000);
-        let mut exit_candidate: usize = 0;
+        let mut treasury_candidate: (usize, usize, usize) = (0, 100, 0);
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
             for col in 0..grid.col_count {
@@ -327,7 +368,7 @@ impl ImageProcessor {
                     (grid.size - inset * 2, grid.size - inset * 2),
                 );
                 let diff = ImageProcessor::compare(&wall_cell, &cell);
-                if diff < (10 * grid.size as u32 * grid.size as u32) {
+                if diff < (15 * grid.size as u32 * grid.size as u32) {
                     // wall
                     cells.push(Cell::Wall);
                 } else {
@@ -341,36 +382,49 @@ impl ImageProcessor {
                         // Special cells have icons, so their min/max has quite some difference.
                         // Of these special cells two are most interesting: entry and treasury.
 
-                        // Glyph for entry point has thinner lines and its outlook is
-                        // less dense. So the characteristic to track is the difference
-                        // between min and max - the closest gets "entry" mark.
-                        if cell_max - cell_min < entry_candidate.1 {
-                            entry_candidate = (cells.len() - 1, cell_max - cell_min);
+                        // First, find symbol box
+                        let dark_mode = cell_avg < 128 * 3;
+                        let (cell_fg, cell_bg) = if dark_mode {
+                            (cell_max, cell_min)
+                        } else {
+                            (cell_min, cell_max)
+                        };
+                        let threshold = (cell_bg * 7 + cell_fg) / 8;
+                        let symbol_box = ImageProcessor::get_symbol_box(&cell, cell_bg, threshold);
+
+                        // skip low starting or badly detected symbols
+                        if symbol_box.top > cell.ncols() / 3
+                            || symbol_box.width <= 4
+                            || symbol_box.height <= 4
+                        {
+                            continue;
                         }
 
-                        // Treasury glyph projection on horizontal axis has more than
-                        // two "sign changes" (going above or below average number of glyph pixels
-                        // per column).
-                        // This is the only glyph that shows such characteristic,
-                        // also in different resolutions.
-                        let x_proj = cell.compress_rows(|col| {
-                            col.iter().filter(|&&value| value < cell_avg).count() as u32
-                        });
-                        // A small nudge of "105/100" is applied after some 
-                        // dark mode jpeg-compressed images were found that, probably due to
-                        // compression artifacts, result in a non-descriptive average
-                        let x_proj_avg = x_proj.sum() * 105 / (x_proj.ncols() as u32 * 100);
-                        let oscillations =
-                            x_proj.iter().fold((0u32, x_proj[0] > x_proj_avg), |mut accum, &value| {
-                                if accum.1 != (value > x_proj_avg) {
-                                    accum.0 += 1;
-                                    accum.1 = !accum.1;
-                                }
-                                accum
-                            });
-                        if oscillations.0 > 2 {
-                            exit_candidate = cells.len() - 1;
+                        // get a characteristic from leftmost column
+                        // (how "filled" with foreground is it)
+                        let glyph_first_column =
+                            cell.slice((symbol_box.top, symbol_box.left), (symbol_box.height, 1));
+                        let glyph_col_avg = glyph_first_column.sum() / symbol_box.height as u32;
+                        let sum_tl = glyph_first_column.fold(0, |acc, value| {
+                            acc + value.max(glyph_col_avg) - value.min(glyph_col_avg)
+                                // add penalty for being too much like background
+                                + 20u32.saturating_sub(cell_bg.max(value) - cell_bg.min(value))
+                        }) / symbol_box.height as u32;
+
+                        // Entrance glyph is very vertical and has a long line on the left
+                        // (also for Erinome), so it should have the least difference
+                        if sum_tl < entry_candidate.1 {
+                            entry_candidate = (cells.len() - 1, sum_tl)
                         }
+
+                        // Treasury glyph is higher and starts earlier than other
+                        if symbol_box.top < treasury_candidate.1
+                            || symbol_box.height > treasury_candidate.2
+                        {
+                            treasury_candidate =
+                                (cells.len() - 1, symbol_box.top, symbol_box.height)
+                        }
+
                     }
                 }
             }
@@ -380,8 +434,8 @@ impl ImageProcessor {
         if entry_candidate.0 > 0 {
             cells[entry_candidate.0] = Cell::Entrance;
         }
-        if exit_candidate > 0 {
-            cells[exit_candidate] = Cell::Treasury;
+        if treasury_candidate.0 > 0 {
+            cells[treasury_candidate.0] = Cell::Treasury;
         }
 
         Maze { grid: *grid, cells }
