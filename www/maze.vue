@@ -55,5 +55,6 @@ export default defineComponent({
 <style>
     .row {
         cursor: pointer;
+        line-height: 10px;
     }
 </style>

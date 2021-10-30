@@ -85,6 +85,7 @@ export default defineComponent({
         text-align: center;
 
         background-color: white;
+        contain: strict;
     }
     .wall {
         background-color: gray;

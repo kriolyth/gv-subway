@@ -487,8 +487,8 @@ mod tests {
             arr.set_index(idx, idx as u8);
         }
         let img = ImageProcessor::new(2, 1, arr);
-        assert_eq!(img.pixels[(0, 0)], 3);
-        assert_eq!(img.pixels[(0, 1)], 15);
+        assert_eq!(img.pixels[(0, 0)], 6);
+        assert_eq!(img.pixels[(0, 1)], 18);
     }
 
     #[wasm_bindgen_test]
@@ -498,15 +498,15 @@ mod tests {
             arr.set_index(idx, idx as u8);
         }
         let img = ImageProcessor::new(2, 2, arr);
-        assert_eq!(img.pixels[(0, 0)], 3);
-        assert_eq!(img.pixels[(0, 1)], 15);
-        assert_eq!(img.pixels[(1, 0)], 27);
-        assert_eq!(img.pixels[(1, 1)], 39);
+        assert_eq!(img.pixels[(0, 0)], 6);
+        assert_eq!(img.pixels[(0, 1)], 18);
+        assert_eq!(img.pixels[(1, 0)], 30);
+        assert_eq!(img.pixels[(1, 1)], 42);
 
         let arr = img.get_image_data();
         assert_eq!(
             arr.to_vec(),
-            vec![1, 1, 1, 255, 5, 5, 5, 255, 9, 9, 9, 255, 13, 13, 13, 255]
+            vec![2, 2, 2, 255, 6, 6, 6, 255, 10, 10, 10, 255, 14, 14, 14, 255]
         );
     }
 }

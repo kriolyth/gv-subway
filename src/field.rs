@@ -1,6 +1,5 @@
 use nalgebra::SMatrix;
 use nalgebra::SVector;
-use std::convert::TryInto;
 use wasm_bindgen::prelude::*;
 
 const SIZE_X: usize = 20;
@@ -57,11 +56,11 @@ pub type VisitedField = SVector<f64, FLAT_SIZE>;
 /// MoverField: "part" of initial group, 4 directions, upon entering a cell
 type MoverField = SMatrix<f64, 4, FLAT_SIZE>;
 
-/// DirVec: movement probability, 4 directions
-type DirVec = SVector<f64, 4>;
+/// DirVec: movement probability, 4 directions normal and jump
+type DirVec = SVector<f64, 8>;
 
-/// DirIndexVec: cell index, 4 directions
-type DirIndexVec = [usize; 4];
+/// DirIndexVec: cell index, 4 directions normal and jump
+type DirIndexVec = [usize; 8];
 
 /// Game field
 #[wasm_bindgen]
@@ -80,6 +79,9 @@ pub struct Subway {
     /// (hence MoveField is 4xFLAT_SIZE), and have the weight according to
     /// movement probability distribution
     movers: MoverField,
+
+    /// jump moves enabled
+    jumpy: bool
 }
 impl Default for Subway {
     fn default() -> Self {
@@ -95,6 +97,7 @@ impl Subway {
             field: [Cell::Wall; FLAT_SIZE],
             visited: SVector::zeros(),
             movers: SMatrix::zeros(),
+            jumpy: false
         }
     }
 
@@ -119,41 +122,84 @@ impl Subway {
         self.visited[idx]
     }
 
-    /// Get possible movements (with move count dynamics)
+    /// Mover directions when looking from south
+    fn mover_probability(walls: [bool; 4]) -> [f64; 4] {
+        match walls {
+            [true, true, true, true] => [0., 0., 0., 0.],
+            [true, true, true, false] => [0., 0., 0., 1.],
+            [true, true, false, true] => [0., 0., 1., 0.],
+            [true, false, true, true] => [0., 1., 0., 0.],
+            [false, true, true, true] => [1., 0., 0., 0.],
+            [true, true, _, false] => [0., 0., 0., 1.],
+            [true, false, _, true] => [0., 0.8, 0.2, 0.],
+            [true, false, _, false] => [0., 0.8, 0., 0.2],
+            [false, true, _, _] => [1., 0., 0., 0.],
+            [false, false, _, _] => [0.85, 0.15, 0., 0.],
+        }
+    }
+
+    /// Get possible movements (with move count dynamics) from current cell `idx`
+    /// when it was entered from direction `in_direction`.
+    ///
+    /// Returns indices of cells to move and probabilities to move in that direction
+    ///
+    /// Depending on `move_count` entrance cell may behave differently.
     fn get_movement(
         &self,
         idx: usize,
         in_direction: Direction,
         move_count: u32,
     ) -> (DirIndexVec, DirVec) {
+        const JUMP_PROBABILITY: f64 = 0.2;
+
         // Walls and exit conditions
         if (self.field[idx] == Cell::Wall)
             || (self.field[idx] == Cell::Entrance && move_count >= 20)
             || (self.field[idx] == Cell::Treasury || self.field[idx] == Cell::Subtreasury)
         {
-            return ([idx; 4], DirVec::zeros());
+            return ([idx; 8], DirVec::zeros());
         }
         // cell indices for relative directions
         let indices = [
             idx + SIZE_X, // when going from north, next north cell is here
-            idx - 1,
-            idx - SIZE_X,
+            idx.saturating_sub(1),
+            idx.saturating_sub(SIZE_X),
             idx + 1,
             idx + SIZE_X, // cycle
-            idx - 1,
-            idx - SIZE_X,
+            idx.saturating_sub(1),
+            idx.saturating_sub(SIZE_X),
         ];
-        let offsets: DirIndexVec = indices[in_direction as usize..in_direction as usize + 4]
-            .try_into()
-            .unwrap();
+        let jump_indices = [
+            idx + 2 * SIZE_X, // when going from north, next north cell is here
+            idx.saturating_sub(2),
+            idx.saturating_sub(2 * SIZE_X),
+            idx + 2,
+            idx + 2 * SIZE_X, // cycle
+            idx.saturating_sub(2),
+            idx.saturating_sub(2 * SIZE_X),
+        ];
+        let mut offsets: DirIndexVec = [0; 8];
+        for i in 0..4 {
+            offsets[i] = indices[in_direction as usize + i].min(FLAT_SIZE - 1);
+            offsets[i + 4] = jump_indices[in_direction as usize + i].min(FLAT_SIZE - 1)
+        }
         let walls = [
             self.field[offsets[0]] == Cell::Wall,
             self.field[offsets[1]] == Cell::Wall,
             self.field[offsets[2]] == Cell::Wall,
             self.field[offsets[3]] == Cell::Wall,
         ];
+        let jump_walls = [
+            self.field[offsets[4]] == Cell::Wall,
+            self.field[offsets[5]] == Cell::Wall,
+            self.field[offsets[6]] == Cell::Wall,
+            self.field[offsets[7]] == Cell::Wall,
+        ];
+        let can_jump = self.jumpy && move_count >= 5 && !jump_walls.iter().all(|&v| v);
+
         if move_count == 0 && self.field[idx] == Cell::Entrance {
             // when initializing, movement at entrance is equally random
+            // (and walk only)
             let num_freeways = walls.iter().filter(|&&x| !x).count();
             let prob = 1.0 / num_freeways as f64;
             let mut probs = DirVec::zeros();
@@ -162,26 +208,25 @@ impl Subway {
             }
             return (offsets, probs);
         }
-        match walls {
-            [true, true, true, true] => (offsets, DirVec::zeros()),
-            [true, true, true, false] => (offsets, DirVec::from([0., 0., 0., 1.])),
-            [true, true, false, true] => (offsets, DirVec::from([0., 0., 1., 0.])),
-            [true, false, true, true] => (offsets, DirVec::from([0., 1., 0., 0.])),
-            [false, true, true, true] => (offsets, DirVec::from([1., 0., 0., 0.])),
-            [true, true, _, false] => (offsets, DirVec::from([0., 0., 0., 1.])),
-            [true, false, _, true] => (offsets, DirVec::from([0., 0.8, 0.2, 0.])),
-            [true, false, _, false] => (offsets, DirVec::from([0., 0.8, 0., 0.2])),
-            [false, true, _, _] => (offsets, DirVec::from([1., 0., 0., 0.])),
-            [false, false, _, true] => (offsets, DirVec::from([0.85, 0.15, 0., 0.])),
-            [false, false, false, false] => (offsets, DirVec::from([0.85, 0.15, 0., 0.])),
-            [false, false, true, false] => (offsets, DirVec::zeros()),
+        let mut result = DirVec::zeros();
+        if !can_jump {
+            result.as_mut_slice()[..4].copy_from_slice(&Subway::mover_probability(walls));
+        } else {
+            let move_probs = Subway::mover_probability(walls);
+            let jump_probs = Subway::mover_probability(jump_walls);
+            for i in 0..4 {
+                result[i] = move_probs[i] * (1. - JUMP_PROBABILITY);
+                result[i + 4] = jump_probs[i] * JUMP_PROBABILITY;
+            }
         }
+        (offsets, result)
     }
 
     /// Initialize probability matrix for first step
-    pub fn init(&mut self) {
+    pub fn init(&mut self, jumpy: bool) {
         self.visited = SVector::zeros();
         self.movers = SMatrix::zeros();
+        self.jumpy = jumpy;
         for idx in 0..FLAT_SIZE {
             let x = idx % SIZE_X;
             let y = idx / SIZE_X;
@@ -195,7 +240,7 @@ impl Subway {
                 self.visited[idx] = 1.0;
                 let (move_idx, move_probs) = self.get_movement(idx, Direction::South, 0);
                 for (dir, next_idx) in move_idx.iter().enumerate() {
-                    self.movers[(dir, *next_idx)] = move_probs[dir];
+                    self.movers[(dir % 4, *next_idx)] = move_probs[dir];
                 }
             }
         }
@@ -204,7 +249,7 @@ impl Subway {
     /// Perform a mover step
     pub fn step(&mut self, step_number: u32) {
         let mut next_movers = MoverField::zeros();
-        let zero_dir = DirVec::zeros();
+        let zero_dir = SVector::zeros();
 
         // update probability matrix: add all movers locations.
         // This will go over 100% for cells visited multiple times,
@@ -277,15 +322,15 @@ mod tests {
         subway.set_field(126, Cell::Pass);
         subway.set_field(125, Cell::Treasury);
 
-        subway.init();
+        subway.init(false);
 
         let (indices, probs) = subway.get_movement(127, Direction::East, 1);
-        assert_eq!(indices, [126, 107, 128, 147]);
-        assert_eq!(probs.as_slice(), [1., 0., 0., 0.]);
+        assert_eq!(indices[..4], [126, 107, 128, 147]);
+        assert_eq!(probs.as_slice(), [1., 0., 0., 0.,  0., 0., 0., 0.]);
 
         let (indices, probs) = subway.get_movement(125, Direction::East, 1);
-        assert_eq!(indices, [125, 125, 125, 125]);
-        assert_eq!(probs.as_slice(), [0., 0., 0., 0.]);
+        assert_eq!(indices[..4], [125, 125, 125, 125]);
+        assert_eq!(probs.as_slice(), [0., 0., 0., 0., 0., 0., 0., 0.]);
     }
 
     #[wasm_bindgen_test]
@@ -296,7 +341,7 @@ mod tests {
         subway.set_field(126, Cell::Pass);
         subway.set_field(125, Cell::Treasury);
 
-        subway.init();
+        subway.init(false);
 
         assert_eq!(subway.get_field(128), Cell::Entrance);
         assert_eq!(subway.visited[128], 1.);
@@ -361,7 +406,7 @@ mod tests {
         subway.set_field(126, Cell::Pass);
         subway.set_field(127, Cell::Treasury);
         subway.set_field(128, Cell::Entrance);
-        subway.init();
+        subway.init(false);
         subway.step(1);
         subway.step(2);
         subway.step(3);
