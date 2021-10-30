@@ -215,7 +215,7 @@ impl ImageProcessor {
             for period in period_range.start..period_range.end {
                 // There should be at least 12 rows. We can search for less, but searching
                 // for more cuts off earlier.
-                if (cols.len() - offset) / (period + 1) < INITIAL_SEEK_SIZE {
+                if (cols.len() - offset + period - 1) / (period + 1) < INITIAL_SEEK_SIZE {
                     // period is too large - the maze won't fit, can work with what we have
                     break;
                 }
@@ -355,7 +355,7 @@ impl ImageProcessor {
             (grid.row_offset + inset, grid.col_offset + inset),
             (grid.size - inset * 2, grid.size - inset * 2),
         );
-        let mut entry_candidate: (usize, u32) = (0, 1000);
+        let mut entry_candidate: (usize, u32, usize) = (0, 1000, 1000);
         let mut treasury_candidate: (usize, usize, usize) = (0, 100, 0);
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
@@ -400,8 +400,10 @@ impl ImageProcessor {
                             continue;
                         }
 
-                        // get a characteristic from leftmost column
-                        // (how "filled" with foreground is it)
+                        // Get a characteristic from leftmost column
+                        // (i.e. how "filled" with foreground is it)
+                        // Entrance glyph is narrow and has a long line on the left
+                        // (also for Erinome), so we check for this
                         let glyph_first_column =
                             cell.slice((symbol_box.top, symbol_box.left), (symbol_box.height, 1));
                         let glyph_col_avg = glyph_first_column.sum() / symbol_box.height as u32;
@@ -411,10 +413,11 @@ impl ImageProcessor {
                                 + 20u32.saturating_sub(cell_bg.max(value) - cell_bg.min(value))
                         }) / symbol_box.height as u32;
 
-                        // Entrance glyph is very vertical and has a long line on the left
-                        // (also for Erinome), so it should have the least difference
-                        if sum_tl < entry_candidate.1 {
-                            entry_candidate = (cells.len() - 1, sum_tl)
+                        if symbol_box.width < entry_candidate.2
+                            || (symbol_box.width == entry_candidate.2 && sum_tl < entry_candidate.1)
+                            || (sum_tl < 10)
+                        {
+                            entry_candidate = (cells.len() - 1, sum_tl, symbol_box.width)
                         }
 
                         // Treasury glyph is higher and starts earlier than other
@@ -424,7 +427,6 @@ impl ImageProcessor {
                             treasury_candidate =
                                 (cells.len() - 1, symbol_box.top, symbol_box.height)
                         }
-
                     }
                 }
             }
