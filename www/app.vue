@@ -33,6 +33,16 @@
                 <input :value="encodedMap" @change="onMapLinkChange" />
             </label>
         </div>
+        <div id="specials">
+            <label>
+                <input
+                    type="checkbox"
+                    v-model="isJumpy"
+                    @change="recalculate(numSteps)"
+                />
+                Прыгучесть
+            </label>
+        </div>
     </div>
     <imagePaste @haveMaze="onHaveMaze"></imagePaste>
 </template>
@@ -41,7 +51,7 @@ import { defineComponent } from "vue";
 import { Subway, Cell, Maze } from "../pkg/gv_subway";
 import maze from "./maze.vue";
 import mazecell from "./mazecell.vue";
-import imagePaste from "./image-paste.vue"
+import imagePaste from "./image-paste.vue";
 
 export default defineComponent({
     components: { maze, mazecell, imagePaste },
@@ -57,6 +67,7 @@ export default defineComponent({
             drawMode: Cell.Pass,
             specials: [-1, -1, -1],
             numSteps: 0,
+            isJumpy: false,
         };
     },
     computed: {
@@ -211,7 +222,7 @@ export default defineComponent({
             this.drawMode = toolId;
         },
         recalculate(numSteps: number, updateFrom: number = 0) {
-            if (!updateFrom) this.field.init();
+            if (!updateFrom) this.field.init(this.isJumpy);
             for (let i = 1; i <= numSteps; i++) {
                 this.field.step(i + updateFrom);
             }
@@ -223,7 +234,7 @@ export default defineComponent({
             }
         },
         reset() {
-            this.field.init();
+            this.field.init(this.isJumpy);
             for (let cell_id = 0; cell_id < 400; cell_id++) {
                 this.cells[cell_id].prob = 0;
             }
@@ -232,18 +243,18 @@ export default defineComponent({
             maze.apply_to_subway(this.field);
             this.specials = [-1, -1, -1];
             for (let cell_id = 0; cell_id < 400; cell_id++) {
-                this.cells[cell_id].cellType = this.field.get_field(cell_id)
+                this.cells[cell_id].cellType = this.field.get_field(cell_id);
                 const specialIndex = [
                     Cell.Entrance,
                     Cell.Treasury,
                     Cell.Subtreasury,
                 ].indexOf(this.cells[cell_id].cellType);
                 if (specialIndex >= 0) {
-                    this.specials[specialIndex] = cell_id
+                    this.specials[specialIndex] = cell_id;
                 }
             }
             if (this.numSteps > 0) this.recalculate(this.numSteps);
-        }
+        },
     },
     watch: {
         numSteps(newValue, oldValue) {
