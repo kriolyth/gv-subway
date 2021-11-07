@@ -14,6 +14,7 @@ pub enum Cell {
     Entrance = 2,
     Treasury = 3,
     Subtreasury = 4,
+    Boss = 5,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -310,6 +311,7 @@ mod tests {
                 Cell::Treasury => f.write_str("[💰]"),
                 Cell::Subtreasury => f.write_str("[📦]"),
                 Cell::Entrance => f.write_str("[🚪]"),
+                Cell::Boss => f.write_str("[💀]"),
             }
         }
     }
