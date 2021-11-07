@@ -33,6 +33,7 @@ export default defineComponent({
                 entrance: this.cellType == Cell.Entrance,
                 treasury: this.cellType == Cell.Treasury,
                 subtreasury: this.cellType == Cell.Subtreasury,
+                boss: this.cellType == Cell.Boss,
             };
         },
         symbol() {
@@ -40,7 +41,7 @@ export default defineComponent({
             if (cell == 1 && this.$props.cellValue) {
                 return this.$props.cellValue.toFixed(3).replace(/^0/, '').substr(0, 4)
             } else {
-                return ['#', ' ', '🚪', '💰', '📦'][cell]
+                return ['#', ' ', '🚪', '💰', '📦', '💀'][cell]
             }
         },
         cellColour() {

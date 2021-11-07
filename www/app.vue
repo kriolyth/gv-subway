@@ -5,7 +5,7 @@
         <div id="drawtool">
             <div>
                 <mazecell
-                    v-for="toolId in 5"
+                    v-for="toolId in 6"
                     :key="toolId"
                     :id="1000 + toolId"
                     :cellType="toolId - 1"
@@ -25,7 +25,11 @@
             />
             <br />
             <span>Шагов: {{ numSteps }}</span>
-            <span id="treasury_prob">{{ treasuryProb }} 💰</span>
+            <span id="prob_section">
+                <span v-if="specials[3] != -1">{{ pointProbs[3] }} 💀</span>
+                <span v-if="specials[2] != -1">{{ pointProbs[2] }} 📦</span>
+                <span v-if="specials[1] != -1">{{ pointProbs[1] }} 💰</span>
+            </span>
         </div>
         <div id="link">
             <label>
@@ -65,7 +69,7 @@ export default defineComponent({
             field: new Subway(),
             cells,
             drawMode: Cell.Pass,
-            specials: [-1, -1, -1],
+            specials: [-1, -1, -1, -1],
             numSteps: 0,
             isJumpy: false,
         };
@@ -105,15 +109,20 @@ export default defineComponent({
 
                 result += s_row;
             }
-            const entrance = this.specials[0];
-            const treasury = this.specials[1];
-            const subtreasury = this.specials[2];
-            return `f=${result}&e=${entrance}&t=${treasury}&s=${subtreasury}`;
+            let specials_string = "estb".split("").reduce((acc, c, idx) => {
+                if (this.specials[idx] == -1) return acc;
+                return acc + `&${c}=${this.specials[idx]}`;
+            }, "");
+            return `f=${result}${specials_string}`;
         },
-        treasuryProb(): string {
-            const treasury = this.specials[1];
-            if (treasury == -1) return "0.00";
-            return this.cells[treasury].prob.toFixed(2);
+        pointProbs(): string[] {
+            let result = ["", "", "", ""];
+            for (let special_id = 1; special_id <= 3; special_id++) {
+                const special = this.specials[special_id];
+                if (special == -1) result[special_id] = "0.00";
+                else result[special_id] = this.cells[special].prob.toFixed(2);
+            }
+            return result;
         },
     },
     created() {
@@ -157,18 +166,20 @@ export default defineComponent({
                         }
                     }
                 }
-                this.specials[0] = parseInt(fields.get("e") || "-1");
-                this.specials[1] = parseInt(fields.get("t") || "-1");
-                this.specials[2] = parseInt(fields.get("s") || "-1");
-                if (this.specials[0] >= 0) {
-                    this.field.set_field(this.specials[0], Cell.Entrance);
-                }
-                if (this.specials[1] >= 0) {
-                    this.field.set_field(this.specials[1], Cell.Treasury);
-                }
-                if (this.specials[2] >= 0) {
-                    this.field.set_field(this.specials[2], Cell.Subtreasury);
-                }
+
+                [
+                    Cell.Entrance,
+                    Cell.Treasury,
+                    Cell.Subtreasury,
+                    Cell.Boss,
+                ].forEach((sp, idx) => {
+                    this.specials[idx] = parseInt(
+                        fields.get("estb".substr(idx, 1)) || "-1"
+                    );
+                    if (this.specials[idx] >= 0) {
+                        this.field.set_field(this.specials[idx], sp);
+                    }
+                });
                 // apply field
                 for (let cell_id = 0; cell_id < 400; cell_id++) {
                     this.cells[cell_id].cellType =
@@ -181,7 +192,11 @@ export default defineComponent({
             }
         },
         touchCell(cell_id: number) {
-            if (this.cells[cell_id].cellType != this.drawMode) {
+            if (
+                this.cells[cell_id].cellType != this.drawMode &&
+                (this.cells[cell_id].cellType != Cell.Wall ||
+                    this.drawMode == Cell.Pass)
+            ) {
                 // if there was a special cell here, remove it anyway
                 if (this.specials.indexOf(cell_id) >= 0) {
                     this.specials[this.specials.indexOf(cell_id)] = -1;
@@ -196,6 +211,7 @@ export default defineComponent({
                     Cell.Entrance,
                     Cell.Treasury,
                     Cell.Subtreasury,
+                    Cell.Boss,
                 ].indexOf(this.drawMode);
                 if (specialDrawMode >= 0) {
                     const specialCell = this.specials[specialDrawMode];
@@ -209,11 +225,7 @@ export default defineComponent({
                     this.specials[specialDrawMode] = cell_id;
                 }
 
-                if (
-                    this.specials[0] >= 0 &&
-                    this.specials[1] >= 0 &&
-                    this.numSteps > 0
-                ) {
+                if (this.specials[0] >= 0 && this.numSteps > 0) {
                     this.recalculate(this.numSteps);
                 }
             }
@@ -241,13 +253,14 @@ export default defineComponent({
         },
         onHaveMaze(maze: Maze) {
             maze.apply_to_subway(this.field);
-            this.specials = [-1, -1, -1];
+            this.specials = [-1, -1, -1, -1];
             for (let cell_id = 0; cell_id < 400; cell_id++) {
                 this.cells[cell_id].cellType = this.field.get_field(cell_id);
                 const specialIndex = [
                     Cell.Entrance,
                     Cell.Treasury,
                     Cell.Subtreasury,
+                    Cell.Boss,
                 ].indexOf(this.cells[cell_id].cellType);
                 if (specialIndex >= 0) {
                     this.specials[specialIndex] = cell_id;
@@ -261,11 +274,7 @@ export default defineComponent({
             if (newValue == 0) {
                 // reset
                 this.reset();
-            } else if (
-                this.specials[0] >= 0 &&
-                this.specials[1] >= 0 &&
-                newValue > 0
-            ) {
+            } else if (this.specials[0] >= 0 && newValue > 0) {
                 // precondition ok
                 if (false && newValue > oldValue) {
                     // update -- numerically unstable?
@@ -301,8 +310,11 @@ export default defineComponent({
     #numsteps {
         width: 100%;
     }
-    #treasury_prob {
+    #prob_section {
         float: right;
+    }
+    #prob_section span {
+        margin-left: 2em;
     }
     #link {
         margin-top: 24px;
