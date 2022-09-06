@@ -4,27 +4,15 @@
         <maze :width="20" :cells="cells" @touchcell="touchCell"></maze>
         <div id="drawtool">
             <div>
-                <mazecell
-                    v-for="toolId in 6"
-                    :key="toolId"
-                    :id="1000 + toolId"
-                    :cellType="toolId - 1"
-                    :class="{ selected: toolId - 1 == drawMode }"
-                    @click="selectTool(toolId - 1)"
-                    @touchstart="selectTool(toolId - 1)"
-                ></mazecell>
+                <mazecell v-for="toolId in 6" :key="toolId" :id="1000 + toolId" :cellType="toolId - 1" :cellValue=0.
+                    :class="{ selected: toolId - 1 == drawMode }" @click="selectTool(toolId - 1)"
+                    @touchstart="selectTool(toolId - 1)"></mazecell>
             </div>
         </div>
         <div id="calc">
-            <input
-                id="numsteps"
-                type="range"
-                min="0"
-                max="100"
-                v-model="numSteps"
-            />
+            <input id="numsteps" type="range" min="0" max="100" v-model="numSteps" />
             <br />
-            <span>Шагов: {{ numSteps }}</span>
+            <span>Шаг: {{ numSteps }}</span>
             <span id="prob_section">
                 <span v-if="specials[3] != -1">{{ pointProbs[3] }} 💀</span>
                 <span v-if="specials[2] != -1">{{ pointProbs[2] }} 📦</span>
@@ -39,11 +27,7 @@
         </div>
         <div id="specials">
             <label>
-                <input
-                    type="checkbox"
-                    v-model="isJumpy"
-                    @change="recalculate(numSteps)"
-                />
+                <input type="checkbox" v-model="isJumpy" @change="recalculate(numSteps)" />
                 Прыгучесть
             </label>
         </div>
@@ -94,7 +78,7 @@ export default defineComponent({
                     let ch =
                         32 * +(this.cells[row + col].cellType != Cell.Wall) +
                         16 *
-                            +(this.cells[row + col + 1].cellType != Cell.Wall) +
+                        +(this.cells[row + col + 1].cellType != Cell.Wall) +
                         8 * +(this.cells[row + col + 2].cellType != Cell.Wall) +
                         4 * +(this.cells[row + col + 3].cellType != Cell.Wall) +
                         2 * +(this.cells[row + col + 4].cellType != Cell.Wall) +
@@ -289,39 +273,48 @@ export default defineComponent({
 });
 </script>
 <style>
-    h3 {
-        text-align: center;
-    }
-    #maze {
-        width: 520px;
-        display: inline-block;
-    }
-    #drawtool {
-        text-align: center;
-    }
-    #drawtool .cell {
-        cursor: pointer;
-        margin: 24px 12px;
-        border: 2px solid transparent;
-    }
-    #drawtool .cell.selected {
-        border: 2px solid black;
-    }
-    #numsteps {
-        width: 100%;
-    }
-    #prob_section {
-        float: right;
-    }
-    #prob_section span {
-        margin-left: 2em;
-    }
-    #link {
-        margin-top: 24px;
-    }
+h3 {
+    text-align: center;
+}
 
-    #link input {
-        width: 80%;
-        margin-left: 1em;
-    }
+#maze {
+    width: 520px;
+    margin-left: auto;
+    margin-right: auto;
+}
+
+#drawtool {
+    text-align: center;
+}
+
+#drawtool .cell {
+    cursor: pointer;
+    margin: 24px 12px;
+    border: 2px solid transparent;
+}
+
+#drawtool .cell.selected {
+    border: 2px solid black;
+}
+
+#numsteps {
+    width: 100%;
+}
+
+#prob_section {
+    float: right;
+}
+
+#prob_section span {
+    margin-left: 2em;
+}
+
+#link {
+    margin-top: 24px;
+}
+
+#link input {
+    width: 80%;
+    margin-left: 1em;
+}
 </style>

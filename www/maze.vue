@@ -1,60 +1,55 @@
-<template>
-    <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
-        <mazecell
-            :colourScheme="0"
-            :cellValue="cell.prob"
-            :cellType="cell.cellType"
-            :id="index + rowIndex * this.rowWidth"
-            v-for="(cell, index) in row"
-            :key="index + rowIndex * this.rowWidth"
-            @touchcell="forwardTouchCell"
-        ></mazecell>
-    </div>
-</template>
-<script lang="ts">
-import { defineComponent, PropType } from "vue";
-import { Cell } from "../pkg/gv_subway";
+<script setup lang="ts">
+import { computed, provide } from 'vue';
+import Rainbow from 'rainbowvis.js';
 import mazecell from "./mazecell.vue";
 
-interface MazeCell {
-    id: Number;
-    cellType: Cell;
-    prob: Number;
+interface CellProps {
+    cellType: number,
+    prob?: number
 }
 
-export default defineComponent({
-    components: { mazecell },
-    props: {
-        width: Number,
-        cells: Array as PropType<Array<MazeCell>>
-    },
-    data() {
-        return {
-            rowWidth: this.$props.width ?? 1,
-            mazeCells: this.$props.cells ?? []
-        }
-    },
-    emits: ['touchcell'],
-    setup() {},
-    computed: {
-        cellRows() {
-            let result = [];
-            for (let row = 0; row < this.mazeCells.length / this.rowWidth; row++) {
-                result.push(this.mazeCells.slice(row * this.rowWidth, (row+1)*this.rowWidth))
-            }
-            return result
-        }
-    },
-    methods: {
-        forwardTouchCell(cell_id: number) {
-            this.$emit("touchcell", cell_id)
-        }
+interface Maze {
+    width: number;
+    cells: CellProps[];
+}
+
+const props = defineProps<Maze>()
+
+const rowWidth = props.width ?? 1;
+const mazeCells = props.cells ?? [];
+const cellRows = computed(() => {
+    let result = [];
+    for (let row = 0; row < mazeCells.length / rowWidth; row++) {
+        result.push(mazeCells.slice(row * rowWidth, (row + 1) * rowWidth))
     }
-});
+    return result
+})
+
+const emit = defineEmits<{
+    (e: 'touchcell', id: number): void
+}>()
+
+function reemitTouchCell(id: number) {
+    emit("touchcell", id)
+}
+
+// provide colour scheme for maze cells to use
+const BluePink = new Rainbow()
+BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
+provide('colourScheme', BluePink)
+
 </script>
+
+<template>
+    <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
+        <mazecell :cellValue="cell.prob" :cellType="cell.cellType"
+            :id="index + rowIndex * rowWidth" v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
+            @touchcell="reemitTouchCell"></mazecell>
+    </div>
+</template>
 <style>
-    .row {
-        cursor: pointer;
-        line-height: 10px;
-    }
+.row {
+    cursor: pointer;
+    line-height: 10px;
+}
 </style>
