@@ -12,6 +12,7 @@ interface Maze {
     width: number;
     cells: CellProps[];
     marks: Mark[];
+    outer: boolean[];
 }
 
 const props = defineProps<Maze>()
@@ -44,14 +45,16 @@ function isBorderCell(rowIndex: number, colIndex: number) {
         <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
             <mazecell v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
                 :cellValue="cell.prob" :cellType="cell.cellType"
-                :mark="marks[index + rowIndex * rowWidth]" :id="index + rowIndex * rowWidth"
+                :mark="marks[index + rowIndex * rowWidth]" 
+                :outer="outer[index + rowIndex * rowWidth]"
+                :id="index + rowIndex * rowWidth"
                 :borderCell="isBorderCell(rowIndex, index)" @touchcell="reemitTouchCell"></mazecell>
         </div>
     </div>
 </template>
 <style>
 #field {
-    width: 520;
+    width: 500px;
 }
 
 .row {

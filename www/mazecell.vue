@@ -9,7 +9,8 @@ interface Props {
     cellType: Cell,
     mark: Mark,
     borderCell: boolean,
-    cellValue?: number
+    cellValue?: number,
+    outer?: boolean
 }
 
 const props = defineProps<Props>()
@@ -27,6 +28,7 @@ const cellClass = computed(() => ({
     inverted: (props.cellValue ?? 0) > 0.6,
     entrance: props.cellType == Cell.Entrance,
     exit: props.cellType == Cell.Exit,
+    outer: props.outer ?? false
 }))
 
 const symbol = computed(() => {
@@ -71,16 +73,16 @@ function handleTouchMove(evt: TouchEvent) {
 
 </script>
 <template>
-    <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour" @pointerdown.prevent="emit('touchcell', props.id)"
-        @pointermove="handleMouseMove" @touchstart.prevent="emit('touchcell', props.id)" @touchmove="handleTouchMove">{{
-        symbol }}
+    <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour" @pointerdown.prevent="handleMouseMove"
+        @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove" @touchmove="handleTouchMove">{{
+        outer ? '·' : symbol }}
     </div>
-    <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ symbol }}</div>
+    <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{outer ? '·' : symbol }}</div>
 </template>
 <script lang="ts">
 // one-time setup
 const BluePink = new Rainbow()
-BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
+BluePink.setSpectrum('fff0fa', 'c0c0ff', '3030a0')
 const colourScheme = BluePink
 </script>
 <style>
@@ -90,7 +92,8 @@ const colourScheme = BluePink
     height: 24px;
     font-size: 10pt;
     font-family: 'Courier New', Courier, monospace;
-    margin: 0;
+    margin-right: -1px;
+    margin-bottom: -1px;
     border: 1px solid #989898;
     line-height: 24px;
     text-align: center;
@@ -103,7 +106,7 @@ const colourScheme = BluePink
 }
 
 .wall {
-    background-color: #e5e5e5;
+    background-color: #e0dac7;
 }
 
 .cell.pass {
@@ -113,5 +116,11 @@ const colourScheme = BluePink
 
 .cell.pass.inverted {
     color: white;
+}
+
+.cell.outer {
+    background-color: transparent;
+    border-color: transparent;
+    color: #989898
 }
 </style>

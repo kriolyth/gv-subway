@@ -6,19 +6,33 @@ import { MarkSymbols, stDraw } from './subway'
 const BRICKS = {
     'wall': '#',
     'space': ' ',
-    'exit_1': MarkSymbols.get(Mark.Treasury),
-    'raise': MarkSymbols.get(Mark.RaiseWall),
     'entrance': MarkSymbols.get(Mark.Entrance),
+    'exit_1': MarkSymbols.get(Mark.Treasury),
     'exit_2': MarkSymbols.get(Mark.Subtreasury),
+    'raise': MarkSymbols.get(Mark.RaiseWall),
 }
 const MARKS = {
     'final_boss': MarkSymbols.get(Mark.FinalBoss),
     'other_boss': MarkSymbols.get(Mark.OtherBoss),
     'clear_mark': '❌',
 }
+const DESC = new Map([
+    ['wall', 'Стена'],
+    ['space', 'Проход'],
+    ['exit_1', 'Сокровищница'],
+    ['exit_2', 'Кладовая'],
+    ['raise', 'Поднять стену'],
+    ['entrance', 'Вход'],
+    ['final_boss', 'Финальный босс'],
+    ['other_boss', 'Путевой босс'],
+    ['clear_mark', 'Убрать метку'],
+])
 
 function setActive(tool: string) {
-    stDraw.drawTool = tool
+    if (stDraw.drawTool != tool)
+        stDraw.drawTool = tool
+    else
+        stDraw.drawTool = 'none';
 }
 
 </script>
@@ -26,11 +40,11 @@ function setActive(tool: string) {
     <div class="drawtool">
         <div class="toolblock">
             <div v-for="(brick, tool) of BRICKS" @pointerdown="setActive(tool)" @ontouchstart="setActive(tool)"
-                :class="[tool, {selected: stDraw.drawTool == tool}]">{{brick}}</div>
+                :class="[tool, {selected: stDraw.drawTool == tool}]" :title="DESC.get(tool)">{{brick}}</div>
         </div>
         <div class="toolblock">
             <div v-for="(mark, tool) of MARKS" @click="setActive(tool)" @ontouchstart="setActive(tool)"
-                :class="[tool, {selected: stDraw.drawTool == tool}]">{{mark}}</div>
+                :class="[tool, {selected: stDraw.drawTool == tool}]" :title="DESC.get(tool)">{{mark}}</div>
         </div>
     </div>
 </template>

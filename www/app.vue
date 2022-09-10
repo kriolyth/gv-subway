@@ -20,7 +20,7 @@ const mapUrl = computed(() => {
 const probes = computed(() => {
     const sortedProbes = Array.from(stCalc.probes).filter(m => stField.marks.indexOf(m) != -1).sort()
     if (stCalc.numSteps == 0) {
-        return sortedProbes.map(mark => ({mark, prob: 0.}));
+        return sortedProbes.map(mark => ({ mark, prob: 0. }));
     }
     const probs = sortedProbes.map(mark => {
         return {
@@ -46,6 +46,7 @@ function onHaveMaze(maze: Maze) {
         stField.cells[cell_id].cellType = stField.field.get_field(cell_id);
         stField.marks[cell_id] = maze.get_mark(cell_id);
     }
+    stField.outerSweep();
     updateProbabilities();
 }
 
@@ -146,7 +147,8 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
     <h3>Куда уходят бревновозы</h3>
     <div id="maze">
         <drawtool></drawtool>
-        <maze :width="20" :cells="stField.cells" :marks="stField.marks" @touchcell="touchCell"></maze>
+        <maze :width="20" :cells="stField.cells" :marks="stField.marks" :outer="stField.outer" @touchcell="touchCell">
+        </maze>
         <div id="calc">
             <input id="numsteps" type="range" min="0" max="100" v-model="stCalc.numSteps" />
             <br />
@@ -180,9 +182,12 @@ h3 {
     margin-left: auto;
     margin-right: auto;
 }
-#calc, #specials {
+
+#calc,
+#specials {
     margin-top: 0.5em;
 }
+
 #numsteps {
     width: 100%;
 }
