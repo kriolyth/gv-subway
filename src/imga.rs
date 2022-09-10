@@ -75,12 +75,18 @@ impl Maze {
         let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
         let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
 
+        // requested coordinate can lie outside of the detected maze, so 
+        // return nothing
         let Coordinate { row, col } = Subway::from_idx(idx);
-        if row < subway_row_offset || col < subway_col_offset {
+        if row < subway_row_offset
+            || col < subway_col_offset
+            || row >= (self.grid.row_count + subway_row_offset)
+            || col >= (self.grid.col_count + subway_col_offset)
+        {
             return Mark::None;
         }
         let grid_idx = (row - subway_row_offset) * self.grid.col_count + (col - subway_col_offset);
-        
+
         if grid_idx < self.marks.len() {
             self.marks[grid_idx]
         } else {
