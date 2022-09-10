@@ -2,8 +2,8 @@ use nalgebra::SMatrix;
 use nalgebra::SVector;
 use wasm_bindgen::prelude::*;
 
-const SIZE_X: usize = 20;
-const SIZE_Y: usize = 20;
+pub const SIZE_X: usize = 20;
+pub const SIZE_Y: usize = 20;
 const FLAT_SIZE: usize = SIZE_X * SIZE_Y;
 
 #[wasm_bindgen]
@@ -12,9 +12,7 @@ pub enum Cell {
     Wall = 0,
     Pass = 1,
     Entrance = 2,
-    Treasury = 3,
-    Subtreasury = 4,
-    Boss = 5,
+    Exit = 3,
 }
 
 #[derive(Copy, Clone, PartialEq, Eq)]
@@ -82,12 +80,19 @@ pub struct Subway {
     movers: MoverField,
 
     /// jump moves enabled
-    jumpy: bool
+    jumpy: bool,
 }
 impl Default for Subway {
     fn default() -> Self {
         Self::new()
     }
+}
+
+#[wasm_bindgen]
+#[derive(Clone, Copy)]
+pub struct Coordinate {
+    pub row: usize,
+    pub col: usize,
 }
 
 #[wasm_bindgen]
@@ -98,19 +103,26 @@ impl Subway {
             field: [Cell::Wall; FLAT_SIZE],
             visited: SVector::zeros(),
             movers: SMatrix::zeros(),
-            jumpy: false
+            jumpy: false,
         }
     }
 
-    pub fn to_idx(&self, row: usize, col: usize) -> usize {
+    /// Convert (row, column) to linear index
+    pub fn to_idx(row: usize, col: usize) -> usize {
         row * SIZE_X + col
+    }
+    /// Convert linear index to (row, column)
+    pub fn from_idx(idx: usize) -> Coordinate {
+        Coordinate {
+            row: idx / SIZE_X,
+            col: idx % SIZE_X,
+        }
     }
 
     /// Set cell type
     pub fn set_field(&mut self, idx: usize, cell: Cell) {
-        let x = idx % SIZE_X;
-        let y = idx / SIZE_X;
-        if (1..=SIZE_X - 2).contains(&x) && (1..=SIZE_Y - 2).contains(&y) {
+        let Coordinate { row, col } = Self::from_idx(idx);
+        if (1..=SIZE_X - 2).contains(&row) && (1..=SIZE_Y - 2).contains(&col) {
             self.field[idx] = cell;
         }
     }
@@ -156,7 +168,7 @@ impl Subway {
         // Walls and exit conditions
         if (self.field[idx] == Cell::Wall)
             || (self.field[idx] == Cell::Entrance && move_count >= 20)
-            || (self.field[idx] == Cell::Treasury || self.field[idx] == Cell::Subtreasury)
+            || (self.field[idx] == Cell::Exit)
         {
             return ([idx; 8], DirVec::zeros());
         }
@@ -308,10 +320,8 @@ mod tests {
             match *self {
                 Cell::Wall => f.write_str("[#]"),
                 Cell::Pass => f.write_str("[ ]"),
-                Cell::Treasury => f.write_str("[💰]"),
-                Cell::Subtreasury => f.write_str("[📦]"),
+                Cell::Exit => f.write_str("[💰]"),
                 Cell::Entrance => f.write_str("[🚪]"),
-                Cell::Boss => f.write_str("[💀]"),
             }
         }
     }
@@ -322,13 +332,13 @@ mod tests {
         subway.set_field(128, Cell::Entrance);
         subway.set_field(127, Cell::Pass);
         subway.set_field(126, Cell::Pass);
-        subway.set_field(125, Cell::Treasury);
+        subway.set_field(125, Cell::Exit);
 
         subway.init(false);
 
         let (indices, probs) = subway.get_movement(127, Direction::East, 1);
         assert_eq!(indices[..4], [126, 107, 128, 147]);
-        assert_eq!(probs.as_slice(), [1., 0., 0., 0.,  0., 0., 0., 0.]);
+        assert_eq!(probs.as_slice(), [1., 0., 0., 0., 0., 0., 0., 0.]);
 
         let (indices, probs) = subway.get_movement(125, Direction::East, 1);
         assert_eq!(indices[..4], [125, 125, 125, 125]);
@@ -341,7 +351,7 @@ mod tests {
         subway.set_field(128, Cell::Entrance);
         subway.set_field(127, Cell::Pass);
         subway.set_field(126, Cell::Pass);
-        subway.set_field(125, Cell::Treasury);
+        subway.set_field(125, Cell::Exit);
 
         subway.init(false);
 
@@ -406,7 +416,7 @@ mod tests {
         subway.set_field(107, Cell::Pass);
         subway.set_field(108, Cell::Pass);
         subway.set_field(126, Cell::Pass);
-        subway.set_field(127, Cell::Treasury);
+        subway.set_field(127, Cell::Exit);
         subway.set_field(128, Cell::Entrance);
         subway.init(false);
         subway.step(1);

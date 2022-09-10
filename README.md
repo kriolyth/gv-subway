@@ -21,7 +21,7 @@ rustup target add wasm32-unknown-unknown
 
 2. Build WASM code
 ```
-wasm-pack build
+wasm-pack build --release
 ```
 
 3. Download / update npm dependencies
@@ -32,7 +32,7 @@ npm install
 
 4. Start in dev mode
 ```
-npm run start
+npm run serve
 ```
 
 5. Build complete page

@@ -3,7 +3,7 @@ use nalgebra::DMatrixSlice;
 use nalgebra::{Const, DMatrix, DVector, Dynamic};
 use wasm_bindgen::prelude::*;
 
-use crate::field::{Cell, Subway};
+use crate::field::{Cell, Coordinate, Subway};
 
 #[wasm_bindgen]
 pub struct ImageProcessor {
@@ -20,28 +20,71 @@ pub struct Grid {
     col_count: usize,
 }
 
+#[wasm_bindgen]
+#[derive(Copy, Clone)]
+pub enum Mark {
+    None = 0,
+    Entrance = 1,
+    Treasury = 2,
+    Subtreasury = 3,
+    FinalBoss = 4,
+    OtherBoss = 5,
+    Ladder = 6,
+    Trap = 7,
+    Luck = 8,
+    RaiseWall = 9,
+    DirectionSign = 10,
+    Scarecrow = 11,
+}
+
 /// Encapsulates detected maze for passing around
 #[wasm_bindgen]
 pub struct Maze {
     grid: Grid,
     cells: Vec<Cell>,
+    marks: Vec<Mark>,
 }
 
 #[wasm_bindgen]
 impl Maze {
     /// Apply detected maze to the subway field
     pub fn apply_to_subway(&self, subway: &mut Subway) {
-        let subway_row_offset = (20 - self.grid.row_count) / 2;
-        let subway_col_offset = (20 - self.grid.col_count) / 2;
+        let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
+        let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
 
         subway.reset();
         for row in 0..self.grid.row_count {
             for col in 0..self.grid.col_count {
+                let grid_idx = row * self.grid.col_count + col;
                 subway.set_field(
-                    subway.to_idx(row + subway_row_offset, col + subway_col_offset),
-                    self.cells[row * self.grid.col_count + col],
+                    Subway::to_idx(row + subway_row_offset, col + subway_col_offset),
+                    match self.marks[grid_idx] {
+                        Mark::Entrance => Cell::Entrance,
+                        Mark::Treasury => Cell::Exit,
+                        _ => self.cells[grid_idx],
+                    },
                 )
             }
+        }
+    }
+
+    /// Get a mark at a specified location
+    ///
+    /// Location relative to larger Subway, which is offseted by maze size
+    pub fn get_mark(&self, idx: usize) -> Mark {
+        let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
+        let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
+
+        let Coordinate { row, col } = Subway::from_idx(idx);
+        if row < subway_row_offset || col < subway_col_offset {
+            return Mark::None;
+        }
+        let grid_idx = (row - subway_row_offset) * self.grid.col_count + (col - subway_col_offset);
+        
+        if grid_idx < self.marks.len() {
+            self.marks[grid_idx]
+        } else {
+            Mark::None
         }
     }
 
@@ -342,8 +385,13 @@ impl ImageProcessor {
     /// Detect the actual cells of the maze
     pub fn detect_maze(&self, grid: &Grid) -> Maze {
         let mut cells = Vec::with_capacity(grid.col_count * grid.row_count);
+        let mut marks = Vec::with_capacity(grid.col_count * grid.row_count);
         if grid.size == 0 {
-            return Maze { grid: *grid, cells };
+            return Maze {
+                grid: *grid,
+                cells,
+                marks,
+            };
         }
 
         // On larger cell sizes grids have thicker borders,
@@ -371,8 +419,11 @@ impl ImageProcessor {
                 if diff < (15 * grid.size as u32 * grid.size as u32) {
                     // wall
                     cells.push(Cell::Wall);
+                    // TODO: detect "raised wall" mark
+                    marks.push(Mark::None);
                 } else {
                     cells.push(Cell::Pass);
+                    marks.push(Mark::None);
                     // we'll try to detect special cells by their very special
                     // characteristics
                     let cell_avg = cell.sum() / (cell.ncols() as u32 * cell.nrows() as u32);
@@ -434,13 +485,19 @@ impl ImageProcessor {
 
         // Apply found candidates to map
         if entry_candidate.0 > 0 {
-            cells[entry_candidate.0] = Cell::Entrance;
+            // cells[entry_candidate.0] = Cell::Entrance;
+            marks[entry_candidate.0] = Mark::Entrance;
         }
         if treasury_candidate.0 > 0 {
-            cells[treasury_candidate.0] = Cell::Treasury;
+            // cells[treasury_candidate.0] = Cell::Exit;
+            marks[treasury_candidate.0] = Mark::Treasury;
         }
 
-        Maze { grid: *grid, cells }
+        Maze {
+            grid: *grid,
+            cells,
+            marks,
+        }
     }
 
     /// Debug draw: paint walls black

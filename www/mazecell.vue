@@ -3,7 +3,7 @@ import { ref, computed, inject } from 'vue';
 import { Cell } from '../pkg/gv_subway'
 import Rainbow from 'rainbowvis.js';
 
-export interface Props {
+interface Props {
     id: number,
     cellType: number,
     cellValue?: number
@@ -15,7 +15,7 @@ const emit = defineEmits<{
 }>()
 
 // injected props
-const colourScheme = inject('colourScheme') || new Rainbow();
+// const colourScheme = inject('colourScheme') || new Rainbow();
 
 // local state
 const lastEmitted = ref(0);
@@ -28,9 +28,7 @@ const cellClass = computed(() => ({
     pass: props.cellType == Cell.Pass,
     inverted: (props.cellValue ?? 0) > 0.6,
     entrance: props.cellType == Cell.Entrance,
-    treasury: props.cellType == Cell.Treasury,
-    subtreasury: props.cellType == Cell.Subtreasury,
-    boss: props.cellType == Cell.Boss,
+    exit: props.cellType == Cell.Exit,
 }))
 
 const symbol = computed(() => {
@@ -76,7 +74,12 @@ function handleTouchMove(evt: TouchEvent) {
         symbol }}
     </div>
 </template>
-
+<script lang="ts">
+// one-time setup
+const BluePink = new Rainbow()
+BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
+const colourScheme = BluePink
+</script>
 <style>
 .cell {
     display: inline-block;
@@ -85,16 +88,17 @@ function handleTouchMove(evt: TouchEvent) {
     font-size: 10pt;
     font-family: 'Courier New', Courier, monospace;
     margin: 0;
-    border: 1px solid silver;
+    border: 1px solid #989898;
     line-height: 24px;
     text-align: center;
 
     background-color: white;
+    color: #707070;
     contain: strict;
 }
 
 .wall {
-    background-color: gray;
+    background-color: #e5e5e5;
 }
 
 .cell.pass {

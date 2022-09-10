@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, provide } from 'vue';
-import Rainbow from 'rainbowvis.js';
+// import Rainbow from 'rainbowvis.js';
 import mazecell from "./mazecell.vue";
 
 interface CellProps {
@@ -34,9 +34,9 @@ function reemitTouchCell(id: number) {
 }
 
 // provide colour scheme for maze cells to use
-const BluePink = new Rainbow()
-BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
-provide('colourScheme', BluePink)
+// const BluePink = new Rainbow()
+// BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
+// provide('colourScheme', BluePink)
 
 </script>
 
