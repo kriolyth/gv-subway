@@ -1,16 +1,17 @@
 <script setup lang="ts">
-import { computed, provide } from 'vue';
-// import Rainbow from 'rainbowvis.js';
+import { Cell, Mark } from 'gv_subway';
+import { computed } from 'vue';
 import mazecell from "./mazecell.vue";
 
 interface CellProps {
-    cellType: number,
+    cellType: Cell,
     prob?: number
 }
 
 interface Maze {
     width: number;
     cells: CellProps[];
+    marks: Mark[];
 }
 
 const props = defineProps<Maze>()
@@ -32,20 +33,23 @@ const emit = defineEmits<{
 function reemitTouchCell(id: number) {
     emit("touchcell", id)
 }
-
-// provide colour scheme for maze cells to use
-// const BluePink = new Rainbow()
-// BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
-// provide('colourScheme', BluePink)
-
 </script>
 
 <template>
-    <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
-        <mazecell :cellValue="cell.prob" :cellType="cell.cellType"
-            :id="index + rowIndex * rowWidth" v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
+    <div class="row" v-for="rowIndex in (mazeCells.length / rowWidth)" :key="rowIndex">
+        <mazecell v-for="colIndex in rowWidth"
+            :cellValue="cells[colIndex-1 + (rowIndex-1) * rowWidth].prob"
+            :cellType="cells[colIndex-1 + (rowIndex-1) * rowWidth].cellType"
+            :mark="marks[colIndex-1 + (rowIndex-1) * rowWidth]"
+            :id="colIndex-1 + (rowIndex-1) * rowWidth" 
+            :key="colIndex + rowIndex * rowWidth"
             @touchcell="reemitTouchCell"></mazecell>
     </div>
+    <!-- <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
+        <mazecell :cellValue="cell.prob" :cellType="cell.cellType" :mark="stField.marks[index + rowIndex * rowWidth]"
+            :id="index + rowIndex * rowWidth" v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
+            @touchcell="reemitTouchCell"></mazecell>
+    </div> -->
 </template>
 <style>
 .row {

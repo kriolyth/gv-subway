@@ -1,17 +1,12 @@
 <script setup lang="ts">
-import { defineComponent, reactive, readonly, onBeforeMount, watch } from "vue";
-import { Subway, Cell, Mark, Maze } from "../pkg/gv_subway";
+import { onBeforeMount, watch } from "vue";
+import { Cell, Mark, Maze } from "../pkg/gv_subway";
 import maze from "./maze.vue";
-import mazecell from "./mazecell.vue";
 import imagePaste from "./image-paste.vue";
 import drawtool from "./drawtool.vue"
 
 import { stCalc, stField, stDraw, encodeMap, MarkSymbols, parseMap } from "./subway";
-import { computed, isReactive } from "@vue/reactivity";
-
-// states
-// specials: [-1, -1, -1, -1] -> these are now probes 
-
+import { computed } from "@vue/reactivity";
 
 // Local methods
 
@@ -129,7 +124,7 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
 <template>
     <h3>Куда уходят бревновозы</h3>
     <div id="maze">
-        <maze :width="20" :cells="stField.cells" @touchcell="touchCell"></maze>
+        <maze :width="20" :cells="stField.cells" :marks="stField.marks" @touchcell="touchCell"></maze>
         <!-- <div id="drawtool">
             <div>
                 <mazecell v-for="toolId in 6" :key="toolId" :id="1000 + toolId" :cellType="toolId - 1" :cellValue=0.

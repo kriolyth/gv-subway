@@ -5,11 +5,11 @@ import { stDraw } from './subway'
 const BRICKS = {
     'wall': '#',
     'space': ' ',
+    'exit_1': '💰',
+    'raise': '□',
     'entrance': '🚪',
-    'raise': '□'
+    'exit_2': '📦',
 }
-const EXIT = '💰'
-
 const MARKS = {
     'final': '💀',
     'mid': '☠'
@@ -26,8 +26,6 @@ function setActive(tool: string) {
         <div class="toolblock">
             <div v-for="(brick, tool) of BRICKS" @click="setActive(tool)"
                 :class="[tool, {selected: stDraw.drawTool == tool}]">{{brick}}</div>
-            <div v-for="tool in ['exit_1', 'exit_2']" @click="setActive(tool)"
-                :class="[tool, {selected: stDraw.drawTool == tool}]">{{EXIT}}</div>
         </div>
         <p class="toolhead">Метки</p>
         <div class="toolblock">
@@ -40,28 +38,39 @@ function setActive(tool: string) {
 .drawtool {
     text-align: center;
     display: grid;
-    grid-template-columns: 1fr 1fr;
+    grid-template-columns: repeat(2,1fr);
     grid-auto-rows: minmax(32px, auto);
+    column-gap: 2em;
+    margin: 1em 0em;
 }
 
 .drawtool .toolhead {
     grid-row: 1;
+    margin: 0px;
 }
 
 .drawtool .toolblock {
     grid-row: 2;
+    display: grid;
+    grid-template-columns: repeat(3,1fr);
+    margin: auto;
+    background-color: #f4f4f4;
+    border: 4px solid #f4f4f4;
+    gap: 4px;
 }
 
 .drawtool .toolblock>div {
-    display: inline-block;
     width: 24px;
+    height: 24px;
     cursor: pointer;
-    margin: 24px 12px;
-    border: 2px solid transparent;
+    margin: auto;
+    border: 3px solid white;
+    background-color: white;
+    user-select: none;
 }
 
-.drawtool .selected {
-    border: 2px solid black;
+.drawtool .toolblock>div.selected {
+    border-color: #989898;
 }
 
 </style>

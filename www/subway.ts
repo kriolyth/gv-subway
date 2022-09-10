@@ -7,7 +7,15 @@ export const MarkSymbols = new Map<Mark, string>([
     [Mark.None, ' '],
     [Mark.Entrance, '🚪'],
     [Mark.FinalBoss, '💀'],
+    [Mark.Subtreasury, '📦'],
     [Mark.Treasury, '💰'],
+    [Mark.OtherBoss, '☠'],
+    [Mark.Ladder, '⬇'],
+    [Mark.Trap, '💩'],
+    [Mark.Luck, '🍀'],
+    [Mark.RaiseWall, '□'],
+    [Mark.DirectionSign, '╬'],
+    [Mark.Scarecrow, '👻']
 ])
 
 export const stField = reactive({
@@ -90,7 +98,8 @@ export const stDraw = reactive({
 })
 export const stCalc = reactive({
     numSteps: 0,
-    probes: new Set<Mark>([Mark.Entrance, Mark.Treasury, Mark.FinalBoss])
+    probes: new Set<Mark>([Mark.Entrance, Mark.Treasury, Mark.Subtreasury,
+        Mark.FinalBoss, Mark.OtherBoss])
 })
 
 

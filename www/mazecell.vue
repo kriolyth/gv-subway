@@ -1,11 +1,13 @@
 <script setup lang="ts">
-import { ref, computed, inject } from 'vue';
-import { Cell } from '../pkg/gv_subway'
+import { computed } from 'vue';
+import { Cell, Mark } from '../pkg/gv_subway'
 import Rainbow from 'rainbowvis.js';
+import { MarkSymbols } from './subway';
 
 interface Props {
     id: number,
-    cellType: number,
+    cellType: Cell,
+    mark: Mark,
     cellValue?: number
 }
 
@@ -14,13 +16,8 @@ const emit = defineEmits<{
     (e: 'touchcell', id: number): void
 }>()
 
-// injected props
-// const colourScheme = inject('colourScheme') || new Rainbow();
-
 // local state
-const lastEmitted = ref(0);
-// const BluePink = new Rainbow()
-// BluePink.setSpectrum('ffc0e0', 'c0c0ff', '3030a0')
+let lastEmitted = 0.;
 
 // computed state
 const cellClass = computed(() => ({
@@ -32,11 +29,15 @@ const cellClass = computed(() => ({
 }))
 
 const symbol = computed(() => {
-    const cell = props.cellType ?? 1
+    const cell = props.cellType ?? Cell.Pass
+    const mark = props.mark ?? Mark.None
     if (cell == 1 && props.cellValue) {
-        return props.cellValue.toFixed(3).replace(/^0/, '').substr(0, 4)
+        return props.cellValue.toFixed(3).replace(/^0/, '').substring(0, 4)
     } else {
-        return ['#', ' ', '🚪', '💰', '📦', '💀'][cell]
+        if (mark)
+            return MarkSymbols.get(mark)
+        else
+            return ['#', ' ', '🚪', '🔼'][cell]
     }
 })
 
@@ -50,9 +51,9 @@ const cellColour = computed(() => {
 // local methods
 function handleCellMove() {
     let nowEmitted = (new Date()).getTime()
-    if (nowEmitted - lastEmitted.value > 50) {
+    if (nowEmitted - lastEmitted > 50) {
         emit('touchcell', props.id)
-        lastEmitted.value = nowEmitted
+        lastEmitted = nowEmitted
     }
 }
 
@@ -93,8 +94,10 @@ const colourScheme = BluePink
     text-align: center;
 
     background-color: white;
-    color: #707070;
+    color: #545454;
     contain: strict;
+
+    user-select: none;
 }
 
 .wall {
