@@ -12,7 +12,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
     - name: Checkout
-      uses: actions/checkout@v2
+      uses: actions/checkout@v3
       with:
         persist-credentials: false
     - name: Get wasm-pack    
@@ -22,9 +22,7 @@ jobs:
     - name: Build web
       run: cd www && npm ci && npm run build
     - name: Publish
-      uses: JamesIves/github-pages-deploy-action@3.7.1
+      uses: JamesIves/github-pages-deploy-action@v4.4.0
       with:
-        FOLDER: www/dist
-        BRANCH: gh-pages
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        CLEAN: true
+        folder: www/dist
+        branch: gh-pages
