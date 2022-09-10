@@ -5,7 +5,9 @@ const { DefinePlugin } = require('webpack')
 
 
 module.exports = {
-    entry: "./bootstrap.ts",
+    entry: {
+        wasm: ["./bootstrap.ts"]
+    },
     output: {
         path: path.resolve(__dirname, "dist"),
         filename: "bootstrap.js", // filename referenced in index.html
@@ -55,7 +57,7 @@ module.exports = {
     ],
 
     experiments: {
-        syncWebAssembly: true
+        asyncWebAssembly: true
     }
 
 }
