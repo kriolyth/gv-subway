@@ -20,8 +20,9 @@ export const MarkSymbols = new Map<Mark, string>([
 
 export const stField = reactive({
     field: new Subway(),
-    cells: (new Array(400)).fill(null).map(v => ({ cellType: Cell.Wall, prob: 0 })),
-    marks: (new Array(400)).fill(null).map(v => Mark.None),
+    cells: (new Array(400)).fill(null).map(_ => ({ cellType: Cell.Wall, prob: 0 })),
+    marks: (new Array(400)).fill(null).map(_ => Mark.None),
+    outer: (new Array(400)).fill(null).map(_ => false),
     isJumpy: false,
     earlyEntranceVisitors: 0., // fraction visited entrance before 20th step
 
@@ -73,6 +74,8 @@ export const stField = reactive({
         }
         else
             this.marks[cellIdx] = mark ?? Mark.None
+        
+        this.outerSweep()
     },
 
     clearByType(cellType: Cell, clearType: Cell = Cell.Pass) {
@@ -93,11 +96,17 @@ export const stField = reactive({
                 this.marks[idx] = Mark.None
             }
         })
+    },
+
+    outerSweep() {
+        // find walls that we don't need to display
+        const neighs = [400 - 21, 400 - 20, 400 - 19, 400 - 1, 0, +1, +19, +20, +21];
+        this.outer.forEach((_, idx, arr) => arr[idx] = neighs.every(n => this.cells[(n + idx) % 400].cellType == Cell.Wall));
     }
 
 })
 export const stDraw = reactive({
-    drawTool: 'none',
+    drawTool: 'space',
 })
 export const stCalc = reactive({
     numSteps: 0,
