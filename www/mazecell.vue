@@ -31,7 +31,7 @@ const cellClass = computed(() => ({
 const symbol = computed(() => {
     const cell = props.cellType ?? Cell.Pass
     const mark = props.mark ?? Mark.None
-    if (cell == 1 && props.cellValue) {
+    if (cell == Cell.Pass && props.cellValue && mark == Mark.None) {
         return props.cellValue.toFixed(3).replace(/^0/, '').substring(0, 4)
     } else {
         if (mark)
@@ -57,21 +57,21 @@ function handleCellMove() {
     }
 }
 
-function handleMouseMove(evt: MouseEvent) {
-    if (evt.buttons) {
+function handleMouseMove(evt: PointerEvent) {
+    if (evt.buttons == 1) {
         handleCellMove()
     }
 }
 function handleTouchMove(evt: TouchEvent) {
-    if (evt.touches.length) {
+    if (evt.touches.length == 1) {
         handleCellMove()
     }
 }
 
 </script>
 <template>
-    <div class="cell" :class="cellClass" :style="cellColour" @mousedown.prevent="emit('touchcell', props.id)"
-        @mousemove="handleMouseMove" @touchstart.prevent="emit('touchcell', props.id)" @touchmove="handleTouchMove">{{
+    <div class="cell" :class="cellClass" :style="cellColour" @pointerdown.prevent="emit('touchcell', props.id)"
+        @pointermove="handleMouseMove" @touchstart.prevent="emit('touchcell', props.id)" @touchmove="handleTouchMove">{{
         symbol }}
     </div>
 </template>

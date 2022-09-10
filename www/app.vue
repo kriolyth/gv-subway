@@ -8,8 +8,6 @@ import drawtool from "./drawtool.vue"
 import { stCalc, stField, stDraw, encodeMap, MarkSymbols, parseMap } from "./subway";
 import { computed } from "@vue/reactivity";
 
-// Local methods
-
 const mapUrl = computed(() => {
     return (
         window.location.origin +
@@ -98,6 +96,23 @@ function touchCell(cellId: number) {
                 stField.setCell(cellId, Cell.Pass, Mark.RaiseWall)
             }
             break;
+        case 'final_boss':
+            // set unique boss mark
+            if (stField.cells[cellId].cellType == Cell.Pass) {
+                stField.clearByTypeAndMark(Cell.Pass, Mark.FinalBoss, Cell.Pass)
+                stField.setCell(cellId, Cell.Pass, Mark.FinalBoss)
+            }
+            break;
+        case 'other_boss':
+            // set non-unique boss mark
+            if (stField.cells[cellId].cellType == Cell.Pass) {
+                stField.setCell(cellId, Cell.Pass, Mark.OtherBoss)
+            }
+            break;
+        case 'clear_mark':
+            // clear existing mark
+            stField.marks[cellId] = Mark.None
+            break;
         default:
             console.log('Pressed %s at %d', stDraw.drawTool, cellId)
     }
@@ -125,13 +140,6 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
     <h3>Куда уходят бревновозы</h3>
     <div id="maze">
         <maze :width="20" :cells="stField.cells" :marks="stField.marks" @touchcell="touchCell"></maze>
-        <!-- <div id="drawtool">
-            <div>
-                <mazecell v-for="toolId in 6" :key="toolId" :id="1000 + toolId" :cellType="toolId - 1" :cellValue=0.
-                    :class="{ selected: toolId - 1 == drawMode }" @click="selectTool(toolId - 1)"
-                    @touchstart="selectTool(toolId - 1)"></mazecell>
-            </div>
-        </div> -->
         <drawtool></drawtool>
         <div id="calc">
             <input id="numsteps" type="range" min="0" max="100" v-model="stCalc.numSteps" />
@@ -156,61 +164,6 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
     </div>
     <imagePaste @haveMaze="onHaveMaze"></imagePaste>
 </template>
-<script lang="ts">
-
-
-// export default defineComponent({
-//     components: { maze, mazecell, imagePaste, tool },
-
-
-//     methods: {
-
-
-//         touchCell(cell_id: number) {
-//             if (
-//                 this.cells[cell_id].cellType != this.drawMode &&
-//                 (this.cells[cell_id].cellType != Cell.Wall ||
-//                     this.drawMode == Cell.Pass)
-//             ) {
-//                 // if there was a special cell here, remove it anyway
-//                 if (this.specials.indexOf(cell_id) >= 0) {
-//                     this.specials[this.specials.indexOf(cell_id)] = -1;
-//                 }
-
-//                 // update cell
-//                 this.field.set_field(cell_id, this.drawMode);
-//                 this.cells[cell_id].cellType = this.field.get_field(cell_id);
-
-//                 // there can be at most one of each special cell types
-//                 const specialDrawMode = [
-//                     Cell.Entrance,
-//                     Cell.Treasury,
-//                     Cell.Subtreasury,
-//                     Cell.Boss,
-//                 ].indexOf(this.drawMode);
-//                 if (specialDrawMode >= 0) {
-//                     const specialCell = this.specials[specialDrawMode];
-//                     if (specialCell >= 0) {
-//                         // set previous to "pass"
-//                         this.field.set_field(specialCell, Cell.Pass);
-//                         this.cells[specialCell].cellType =
-//                             this.field.get_field(specialCell);
-//                     }
-//                     // update position of the new special cell
-//                     this.specials[specialDrawMode] = cell_id;
-//                 }
-
-//                 if (this.specials[0] >= 0 && this.numSteps > 0) {
-//                     this.recalculate(this.numSteps);
-//                 }
-//             }
-//         },
-
-
-//     },
-
-// });
-</script>
 <style>
 h3 {
     text-align: center;

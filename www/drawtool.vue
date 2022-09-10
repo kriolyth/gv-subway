@@ -1,18 +1,20 @@
 <script setup lang="ts">
-import { stDraw } from './subway'
+import { Mark } from 'gv_subway';
+import { MarkSymbols, stDraw } from './subway'
 
 
 const BRICKS = {
     'wall': '#',
     'space': ' ',
-    'exit_1': '💰',
-    'raise': '□',
-    'entrance': '🚪',
-    'exit_2': '📦',
+    'exit_1': MarkSymbols.get(Mark.Treasury),
+    'raise': MarkSymbols.get(Mark.RaiseWall),
+    'entrance': MarkSymbols.get(Mark.Entrance),
+    'exit_2': MarkSymbols.get(Mark.Subtreasury),
 }
 const MARKS = {
-    'final': '💀',
-    'mid': '☠'
+    'final_boss': MarkSymbols.get(Mark.FinalBoss),
+    'other_boss': MarkSymbols.get(Mark.OtherBoss),
+    'clear_mark': '❌',
 }
 
 function setActive(tool: string) {
@@ -24,13 +26,13 @@ function setActive(tool: string) {
     <div class="drawtool">
         <p class="toolhead">Кирпичики</p>
         <div class="toolblock">
-            <div v-for="(brick, tool) of BRICKS" @click="setActive(tool)"
+            <div v-for="(brick, tool) of BRICKS" @pointerdown="setActive(tool)" @ontouchstart="setActive(tool)"
                 :class="[tool, {selected: stDraw.drawTool == tool}]">{{brick}}</div>
         </div>
         <p class="toolhead">Метки</p>
         <div class="toolblock">
-            <div v-for="(mark, tool) of MARKS" @click="setActive(tool)" :class="[tool, {selected: stDraw.drawTool == tool}]">
-                {{mark}}</div>
+            <div v-for="(mark, tool) of MARKS" @click="setActive(tool)" @ontouchstart="setActive(tool)"
+                :class="[tool, {selected: stDraw.drawTool == tool}]">{{mark}}</div>
         </div>
     </div>
 </template>

@@ -57,6 +57,9 @@ export const stField = reactive({
     setCell(cellIdx: number, cellType: Cell, mark?: Mark) {
         this.field.set_field(cellIdx, cellType)
         this.cells[cellIdx].cellType = this.field.get_field(cellIdx)
+        if (this.cells[cellIdx].cellType != cellType)
+            // update field failed
+            return;
         if (cellType == Cell.Entrance)
             this.marks[cellIdx] = Mark.Entrance
         else if (cellType == Cell.Exit)
