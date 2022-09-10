@@ -8,6 +8,7 @@ interface Props {
     id: number,
     cellType: Cell,
     mark: Mark,
+    borderCell: boolean,
     cellValue?: number
 }
 
@@ -70,10 +71,11 @@ function handleTouchMove(evt: TouchEvent) {
 
 </script>
 <template>
-    <div class="cell" :class="cellClass" :style="cellColour" @pointerdown.prevent="emit('touchcell', props.id)"
+    <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour" @pointerdown.prevent="emit('touchcell', props.id)"
         @pointermove="handleMouseMove" @touchstart.prevent="emit('touchcell', props.id)" @touchmove="handleTouchMove">{{
         symbol }}
     </div>
+    <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ symbol }}</div>
 </template>
 <script lang="ts">
 // one-time setup

@@ -33,27 +33,27 @@ const emit = defineEmits<{
 function reemitTouchCell(id: number) {
     emit("touchcell", id)
 }
+
+function isBorderCell(rowIndex: number, colIndex: number) {
+    return (rowIndex == 0 || colIndex == 0 || rowIndex == (rowWidth - 1) || colIndex == (mazeCells.length / rowWidth - 1));
+}
 </script>
 
 <template>
     <div id="field">
-        <div class="row" v-for="rowIndex in (mazeCells.length / rowWidth)" :key="rowIndex">
-            <mazecell v-for="colIndex in rowWidth" :cellValue="cells[colIndex-1 + (rowIndex-1) * rowWidth].prob"
-                :cellType="cells[colIndex-1 + (rowIndex-1) * rowWidth].cellType"
-                :mark="marks[colIndex-1 + (rowIndex-1) * rowWidth]" :id="colIndex-1 + (rowIndex-1) * rowWidth"
-                :key="colIndex + rowIndex * rowWidth" @touchcell="reemitTouchCell"></mazecell>
+        <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
+            <mazecell v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
+                :cellValue="cell.prob" :cellType="cell.cellType"
+                :mark="marks[index + rowIndex * rowWidth]" :id="index + rowIndex * rowWidth"
+                :borderCell="isBorderCell(rowIndex, index)" @touchcell="reemitTouchCell"></mazecell>
         </div>
-        <!-- <div class="row" v-for="(row, rowIndex) in cellRows" :key="rowIndex">
-        <mazecell :cellValue="cell.prob" :cellType="cell.cellType" :mark="stField.marks[index + rowIndex * rowWidth]"
-            :id="index + rowIndex * rowWidth" v-for="(cell, index) in row" :key="index + rowIndex * rowWidth"
-            @touchcell="reemitTouchCell"></mazecell>
-    </div> -->
     </div>
 </template>
 <style>
 #field {
     width: 520;
 }
+
 .row {
     cursor: pointer;
     line-height: 10px;

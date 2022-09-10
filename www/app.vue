@@ -167,8 +167,8 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
                 Прыгучесть
             </label>
         </div>
+        <imagePaste @haveMaze="onHaveMaze"></imagePaste>
     </div>
-    <imagePaste @haveMaze="onHaveMaze"></imagePaste>
 </template>
 <style>
 h3 {
@@ -180,7 +180,9 @@ h3 {
     margin-left: auto;
     margin-right: auto;
 }
-
+#calc, #specials {
+    margin-top: 0.5em;
+}
 #numsteps {
     width: 100%;
 }

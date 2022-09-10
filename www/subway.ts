@@ -65,10 +65,10 @@ export const stField = reactive({
         else if (cellType == Cell.Exit)
             this.marks[cellIdx] = mark ?? Mark.Treasury
         else if (cellType == Cell.Pass) {
-            // for space: keep marks, unless it is a raised wall
-            if (mark !== undefined) 
+            // for space: keep marks, unless it is a specialized mark
+            if (mark !== undefined)
                 this.marks[cellIdx] = mark
-            else if (this.marks[cellIdx] == Mark.RaiseWall)
+            else if ([Mark.RaiseWall, Mark.Entrance, Mark.Treasury, Mark.Subtreasury].indexOf(this.marks[cellIdx]) >= 0)
                 this.marks[cellIdx] = Mark.None
         }
         else
@@ -102,7 +102,7 @@ export const stDraw = reactive({
 export const stCalc = reactive({
     numSteps: 0,
     probes: new Set<Mark>([Mark.Entrance, Mark.Treasury, Mark.Subtreasury,
-        Mark.FinalBoss, Mark.OtherBoss])
+    Mark.FinalBoss, Mark.OtherBoss])
 })
 
 
@@ -195,7 +195,7 @@ export function parseMap(request: string) {
 
             stField.cells[cell_id].prob = 0;
         }
-        if (stCalc.numSteps > 0) stField.recalculate(stCalc.numSteps);        
+        if (stCalc.numSteps > 0) stField.recalculate(stCalc.numSteps);
     } catch (e) {
         console.log(e);
     }
