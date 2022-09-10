@@ -112,6 +112,12 @@ function touchCell(cellId: number) {
         case 'clear_mark':
             // clear existing mark
             stField.marks[cellId] = Mark.None
+            if (stField.cells[cellId].cellType == Cell.Entrance) {
+                stField.setCell(cellId, Cell.Pass)
+            }
+            // a subtle trick: you can set an exit and clear its mark,
+            // so you can have more than two exits. De-marked exits are shown
+            // with a special "up" triangle.
             break;
         default:
             console.log('Pressed %s at %d', stDraw.drawTool, cellId)
@@ -139,8 +145,8 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
 <template>
     <h3>Куда уходят бревновозы</h3>
     <div id="maze">
-        <maze :width="20" :cells="stField.cells" :marks="stField.marks" @touchcell="touchCell"></maze>
         <drawtool></drawtool>
+        <maze :width="20" :cells="stField.cells" :marks="stField.marks" @touchcell="touchCell"></maze>
         <div id="calc">
             <input id="numsteps" type="range" min="0" max="100" v-model="stCalc.numSteps" />
             <br />
@@ -170,7 +176,7 @@ h3 {
 }
 
 #maze {
-    width: 520px;
+    width: 560px;
     margin-left: auto;
     margin-right: auto;
 }
