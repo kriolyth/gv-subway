@@ -55,6 +55,7 @@ function isBorderCell(rowIndex: number, colIndex: number) {
 <style>
 #field {
     width: 500px;
+    touch-action: manipulation;
 }
 
 .row {

@@ -39,7 +39,7 @@ function setActive(tool: string) {
 <template>
     <div class="drawtool">
         <div class="toolblock">
-            <div v-for="(brick, tool) of BRICKS" @pointerdown="setActive(tool)" @ontouchstart="setActive(tool)"
+            <div v-for="(brick, tool) of BRICKS" @click="setActive(tool)" @ontouchstart="setActive(tool)"
                 :class="[tool, {selected: stDraw.drawTool == tool}]" :title="DESC.get(tool)">{{brick}}</div>
         </div>
         <div class="toolblock">
