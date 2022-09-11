@@ -54,7 +54,7 @@ const cellColour = computed(() => {
 // local methods
 function handleCellMove() {
     let nowEmitted = (new Date()).getTime()
-    if (nowEmitted - lastEmitted > 50) {
+    if (nowEmitted - lastEmitted > 20) {
         emit('touchcell', props.id)
         lastEmitted = nowEmitted
     }
@@ -66,7 +66,7 @@ function handleMouseMove(evt: PointerEvent) {
     }
 }
 function handleTouchMove(evt: TouchEvent) {
-    if (evt.touches.length == 1) {
+        if (evt.touches.length == 1) {
         handleCellMove()
     }
 }
@@ -74,7 +74,7 @@ function handleTouchMove(evt: TouchEvent) {
 </script>
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour" @pointerdown.prevent="handleMouseMove"
-        @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove" @touchmove="handleTouchMove">{{
+    @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove" @touchmove="handleTouchMove">{{
         outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{outer ? '·' : symbol }}</div>
@@ -103,6 +103,8 @@ const colourScheme = BluePink
     contain: strict;
 
     user-select: none;
+    touch-action: manipulation;
+
 }
 
 .wall {
