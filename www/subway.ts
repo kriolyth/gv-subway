@@ -107,7 +107,7 @@ export const stField = reactive({
 })
 export const stDraw = reactive({
     drawTool: 'space',
-    showAllMarks: true,
+    showAllMarks: false,
 })
 export const stCalc = reactive({
     numSteps: 0,
