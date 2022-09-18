@@ -14,7 +14,7 @@ export const MarkSymbols = new Map<Mark, string>([
     [Mark.Trap, '💩'],
     [Mark.Luck, '🍀'],
     [Mark.RaiseWall, '□'],
-    [Mark.DirectionSign, '╬'],
+    [Mark.Direction, '╬'],
     [Mark.Scarecrow, '👻']
 ])
 
