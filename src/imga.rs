@@ -18,6 +18,7 @@ const DETECT_THRESHOLD: i32 = 30;
 pub struct ImageProcessor {
     pixels: DMatrix<u32>,
     known_features: Vec<(FeatureVector, Mark)>,
+    debug_output: bool
 }
 
 #[wasm_bindgen]
@@ -260,7 +261,7 @@ impl Display for FeatureVector {
 #[wasm_bindgen]
 impl ImageProcessor {
     /// Load image and known features
-    fn from_matrix(width: usize, height: usize, matrix: DMatrix<u8>) -> Self {
+    fn from_matrix(width: usize, height: usize, matrix: DMatrix<u8>, debug: bool) -> Self {
         Self {
             // convert to grayscale without divide step
             pixels: matrix
@@ -276,17 +277,18 @@ impl ImageProcessor {
                 .iter()
                 .map(|data| (FeatureVector::from_data(&data.0), data.1))
                 .collect(),
+            debug_output: debug
         }
     }
 
     #[wasm_bindgen(constructor)]
-    pub fn new(width: usize, height: usize, data: Uint8ClampedArray) -> Self {
+    pub fn new(width: usize, height: usize, data: Uint8ClampedArray, debug: bool) -> Self {
         // read RGBA data from uint8 array into 4x(loooong) matrix
         let mut img_vector = DMatrix::zeros(4, width * height);
         data.copy_to(img_vector.as_mut_slice());
         // ignore alpha
         img_vector.row_mut(3).fill(0);
-        Self::from_matrix(width, height, img_vector)
+        Self::from_matrix(width, height, img_vector, debug)
     }
 
     pub fn from_rgba_slice(width: usize, height: usize, data: &[u8]) -> Self {
@@ -296,7 +298,7 @@ impl ImageProcessor {
         // ignore alpha
         img_vector.row_mut(3).fill(0);
 
-        Self::from_matrix(width, height, img_vector)
+        Self::from_matrix(width, height, img_vector, false)
     }
 
     pub fn height(&self) -> u32 {
@@ -548,6 +550,14 @@ impl ImageProcessor {
                         cell_img = imageops::resize(&cell_img, 8, 8, imageops::CatmullRom);
                         let feature_vector = FeatureVector::from_image(&cell_img);
                         let (detected_mark, similarity) = self.get_closest_feature(&feature_vector);
+                        if self.debug_output {
+                            web_sys::console::log_1(
+                                &format!("At {}:{} distance {} to {:?}", row, col, similarity, detected_mark).into(),
+                            );
+                            web_sys::console::log_1(
+                                &format!("({}, Mark::{:?}),", &feature_vector.get_data(), detected_mark).into(),
+                            );
+                        }                        
                         if similarity <= DETECT_THRESHOLD {
                             match detected_mark {
                                 Mark::Entrance => {
@@ -566,10 +576,6 @@ impl ImageProcessor {
                                     }
                                 }
                             }
-                        } else {
-                            web_sys::console::log_1(
-                                &format!("At {}:{} distance {} to {:?}", col, row, similarity, detected_mark).into(),
-                            );
                         }
                     }
                 }
@@ -633,12 +639,12 @@ mod tests {
     fn img_1_pixel() {
         let arr = Uint8ClampedArray::new_with_length(4);
         arr.fill(0, 0, 4);
-        let img = ImageProcessor::new(1, 1, arr);
+        let img = ImageProcessor::new(1, 1, arr, false);
         assert_eq!(img.pixels[(0, 0)], 0);
 
         let arr = Uint8ClampedArray::new_with_length(4);
         arr.fill(255, 0, 4);
-        let img = ImageProcessor::new(1, 1, arr);
+        let img = ImageProcessor::new(1, 1, arr, false);
         assert_eq!(img.pixels[(0, 0)], 255 * 3);
     }
 
@@ -648,7 +654,7 @@ mod tests {
         for idx in 0..8 {
             arr.set_index(idx, idx as u8);
         }
-        let img = ImageProcessor::new(2, 1, arr);
+        let img = ImageProcessor::new(2, 1, arr, false);
         assert_eq!(img.pixels[(0, 0)], 6);
         assert_eq!(img.pixels[(0, 1)], 18);
     }
@@ -659,7 +665,7 @@ mod tests {
         for idx in 0..16 {
             arr.set_index(idx, idx as u8);
         }
-        let img = ImageProcessor::new(2, 2, arr);
+        let img = ImageProcessor::new(2, 2, arr, false);
         assert_eq!(img.pixels[(0, 0)], 6);
         assert_eq!(img.pixels[(0, 1)], 18);
         assert_eq!(img.pixels[(1, 0)], 30);

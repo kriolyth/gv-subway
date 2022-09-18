@@ -55,7 +55,8 @@ export default defineComponent({
                     let processor = new ImageProcessor(
                         imageData.width,
                         imageData.height,
-                        imageData.data
+                        imageData.data,
+                        vm.debugOutput
                     );
                     vm.processingState = "Проверяем...";
                     let maze = processor.detect_maze(processor.detect_grid());

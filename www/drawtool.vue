@@ -26,6 +26,7 @@ const DESC = new Map([
     ['final_boss', 'Финальный босс'],
     ['other_boss', 'Путевой босс'],
     ['clear_mark', 'Убрать метку'],
+    ['show_all', 'Показывать все метки'],
 ])
 
 function setActive(tool: string) {
@@ -33,6 +34,10 @@ function setActive(tool: string) {
         stDraw.drawTool = tool
     else
         stDraw.drawTool = 'none';
+}
+
+function toggleShowAll() {
+    stDraw.showAllMarks = !stDraw.showAllMarks
 }
 
 </script>
@@ -45,6 +50,10 @@ function setActive(tool: string) {
         <div class="toolblock">
             <div v-for="(mark, tool) of MARKS" @click="setActive(tool)" @ontouchstart="setActive(tool)"
                 :class="[tool, {selected: stDraw.drawTool == tool}]" :title="DESC.get(tool)">{{mark}}</div>
+        </div>
+        <div class="toolblock">
+            <div @click="toggleShowAll()" @ontouchstart="toggleShowAll()"
+                :class="['showall', {selected: stDraw.showAllMarks}]" :title="DESC.get('show_all')">👁</div>
         </div>
     </div>
 </template>

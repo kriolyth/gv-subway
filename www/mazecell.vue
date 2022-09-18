@@ -2,7 +2,7 @@
 import { computed } from 'vue';
 import { Cell, Mark } from '../pkg/gv_subway'
 import Rainbow from 'rainbowvis.js';
-import { MarkSymbols } from './subway';
+import { MarkSymbols, stDraw } from './subway';
 
 interface Props {
     id: number,
@@ -33,12 +33,17 @@ const cellClass = computed(() => ({
 
 const symbol = computed(() => {
     const cell = props.cellType ?? Cell.Pass
-    const mark = props.mark ?? Mark.None
-    if (cell == Cell.Pass && props.cellValue && mark == Mark.None) {
+    let mark = props.mark ?? Mark.None
+    if (!stDraw.showAllMarks && [
+        Mark.Entrance, Mark.Treasury, Mark.FinalBoss, Mark.OtherBoss].indexOf(mark) == -1) {
+        mark = Mark.None
+    }
+    if (cell == Cell.Pass && props.cellValue && (mark == Mark.None)) {
         return props.cellValue.toFixed(3).replace(/^0/, '').substring(0, 4)
     } else {
-        if (mark)
+        if (mark) {
             return MarkSymbols.get(mark)
+        }
         else
             return ['#', ' ', '🚪', '🔼'][cell]
     }
@@ -66,15 +71,16 @@ function handleMouseMove(evt: PointerEvent) {
     }
 }
 function handleTouchMove(evt: TouchEvent) {
-        if (evt.touches.length == 1) {
+    if (evt.touches.length == 1) {
         handleCellMove()
     }
 }
 
 </script>
 <template>
-    <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour" @pointerdown.prevent="handleMouseMove"
-    @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove" @touchmove="handleTouchMove">{{
+    <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
+        @pointerdown.prevent="handleMouseMove" @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove"
+        @touchmove="handleTouchMove">{{
         outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{outer ? '·' : symbol }}</div>
