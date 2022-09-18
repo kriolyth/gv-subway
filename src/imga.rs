@@ -1,40 +1,52 @@
+use std::fmt::{Debug, Display};
+
+use bitvec::prelude::BitArray;
+use image::{imageops, GrayImage, Luma};
 use js_sys::Uint8ClampedArray;
 use nalgebra::DMatrixSlice;
 use nalgebra::{Const, DMatrix, DVector, Dynamic};
 use wasm_bindgen::prelude::*;
 
+use crate::brief::{center_mass, Brief, get_brief_vectors};
+use crate::features::FEATURE_DATA;
 use crate::field::{Cell, Coordinate, Subway};
+
+/// Threshold for closeness to existing feature data
+const DETECT_THRESHOLD: i32 = 30;
 
 #[wasm_bindgen]
 pub struct ImageProcessor {
     pixels: DMatrix<u32>,
+    known_features: Vec<(FeatureVector, Mark)>,
 }
 
 #[wasm_bindgen]
 #[derive(Copy, Clone)]
 pub struct Grid {
-    size: usize,
-    row_offset: usize,
-    col_offset: usize,
-    row_count: usize,
-    col_count: usize,
+    pub size: usize,
+    pub row_offset: usize,
+    pub col_offset: usize,
+    pub row_count: usize,
+    pub col_count: usize,
 }
 
 #[wasm_bindgen]
-#[derive(Copy, Clone)]
+#[derive(Copy, Clone, Debug)]
 pub enum Mark {
     None = 0,
-    Entrance = 1,
-    Treasury = 2,
-    Subtreasury = 3,
-    FinalBoss = 4,
-    OtherBoss = 5,
-    Ladder = 6,
-    Trap = 7,
-    Luck = 8,
-    RaiseWall = 9,
-    DirectionSign = 10,
-    Scarecrow = 11,
+    Wall = 1,
+    Entrance = 2,
+    Treasury = 3,
+    Subtreasury = 4,
+    FinalBoss = 5,
+    OtherBoss = 6,
+    Ladder = 7,
+    Trap = 8,
+    Luck = 9,
+    RaiseWall = 10,
+    Direction = 11,
+    Scarecrow = 12,
+    Fountain = 13,
 }
 
 /// Encapsulates detected maze for passing around
@@ -75,7 +87,7 @@ impl Maze {
         let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
         let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
 
-        // requested coordinate can lie outside of the detected maze, so 
+        // requested coordinate can lie outside of the detected maze, so
         // return nothing
         let Coordinate { row, col } = Subway::from_idx(idx);
         if row < subway_row_offset
@@ -162,26 +174,96 @@ impl GridPeriod {
     }
 }
 
-struct SymbolBox {
-    left: usize,
-    top: usize,
-    width: usize,
-    height: usize,
+/// Stored data that describes icon features (FeatureVector)
+#[derive(Debug)]
+pub struct FeatureData {
+	pub x: i32,
+	pub y: i32,
+	pub bits_1: [u32; 6],
+	pub bits_2: [u32; 6],
+}
+
+impl Display for FeatureData {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("{:?}", self))
+    }
+}
+
+/// Icon description with BRIEF vector
+#[derive(Default)]
+pub struct FeatureVector(pub [Brief; 2]);
+
+impl FeatureVector {
+    pub fn from_image(img: &GrayImage) -> Self {
+        let sym_min = *img.iter().min().unwrap() as u16;
+        let sym_max = *img.iter().max().unwrap() as u16;
+        let thresh = if sym_max - sym_min < 30 {
+            0u8
+        } else {
+            ((sym_min * 2 + sym_max * 5) / 7) as u8
+        };
+        let binarized = imageproc::contrast::threshold(img, thresh);
+
+        // Find image center and encode BRIEF vector
+        // Blurring allows for limited imprecise matching
+        let resized = imageops::resize(&binarized, 24, 24, imageops::CatmullRom);
+        let blurred = imageops::blur(&resized, 0.6);
+        let center = center_mass(&resized);
+        FeatureVector(get_brief_vectors(&blurred, &[center, (center.0 + 1, center.1)]))
+    }
+
+    pub fn from_data(feature_data: &FeatureData) -> Self {
+        Self([
+            Brief {
+                x: feature_data.x,
+                y: feature_data.y,
+                b: BitArray::from(feature_data.bits_1),
+            },
+            Brief {
+                x: feature_data.x + 1,
+                y: feature_data.y,
+                b: BitArray::from(feature_data.bits_2),
+            },
+        ])
+    }
+
+    pub fn distance(&self, other: &FeatureVector) -> i32 {
+        // match BRIEF vectors
+        *([
+            self.0[0].distance(&other.0[0]),
+            self.0[0].distance(&other.0[1]),
+            self.0[1].distance(&other.0[1]),
+        ]
+        .iter()
+        .min()
+        .unwrap_or(&0)) as i32
+    }
+
+    #[allow(dead_code)]
+    /// create object representation in Rust notation
+    pub fn get_data(&self) -> FeatureData {
+        FeatureData {
+            x: self.0[0].x,
+            y: self.0[0].y,
+            bits_1: self.0[0].b.data,
+            bits_2: self.0[1].b.data,
+        }
+    }
+}
+
+impl Display for FeatureVector {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("[{}, {}]", self.0[0], self.0[1]))
+    }
 }
 
 #[wasm_bindgen]
 impl ImageProcessor {
-    #[wasm_bindgen(constructor)]
-    pub fn new(width: usize, height: usize, data: Uint8ClampedArray) -> Self {
-        // read RGBA data from uint8 array into 4x(loooong) matrix
-        let mut img_vector = DMatrix::zeros(4, width * height);
-        data.copy_to(img_vector.as_mut_slice());
-        // ignore alpha
-        img_vector.row_mut(3).fill(0);
-
+    /// Load image and known features
+    fn from_matrix(width: usize, height: usize, matrix: DMatrix<u8>) -> Self {
         Self {
             // convert to grayscale without divide step
-            pixels: img_vector
+            pixels: matrix
                 .cast::<u32>()
                 .compress_rows(|col| col.max() * 3)
                 // .row_sum()
@@ -190,7 +272,31 @@ impl ImageProcessor {
                 // (may remove for production)
                 .reshape_generic(Dynamic::new(width), Dynamic::new(height))
                 .transpose(),
+            known_features: FEATURE_DATA
+                .iter()
+                .map(|data| (FeatureVector::from_data(&data.0), data.1))
+                .collect(),
         }
+    }
+
+    #[wasm_bindgen(constructor)]
+    pub fn new(width: usize, height: usize, data: Uint8ClampedArray) -> Self {
+        // read RGBA data from uint8 array into 4x(loooong) matrix
+        let mut img_vector = DMatrix::zeros(4, width * height);
+        data.copy_to(img_vector.as_mut_slice());
+        // ignore alpha
+        img_vector.row_mut(3).fill(0);
+        Self::from_matrix(width, height, img_vector)
+    }
+
+    pub fn from_rgba_slice(width: usize, height: usize, data: &[u8]) -> Self {
+        // read RGBA data from uint8 array into 4x(loooong) matrix
+        let mut img_vector = DMatrix::zeros(4, width * height);
+        img_vector.copy_from_slice(data);
+        // ignore alpha
+        img_vector.row_mut(3).fill(0);
+
+        Self::from_matrix(width, height, img_vector)
     }
 
     pub fn height(&self) -> u32 {
@@ -200,10 +306,9 @@ impl ImageProcessor {
         self.pixels.ncols() as u32
     }
 
-    pub fn get_image_data(&self) -> Uint8ClampedArray {
+    fn get_rgba_matrix(&self) -> DMatrix<u8> {
         let width = self.width();
         let height = self.height();
-        let result = Uint8ClampedArray::new_with_length(4 * width * height);
         let single_row_image = self
             .pixels
             .transpose()
@@ -214,8 +319,19 @@ impl ImageProcessor {
         rgba_image.set_row(1, &single_row_image.row(0));
         rgba_image.set_row(2, &single_row_image.row(0));
         // 4th row left at 255 for alpha
+        rgba_image
+    }
+
+    pub fn get_image_data(&self) -> Uint8ClampedArray {
+        let rgba_image = self.get_rgba_matrix();
+        let result = Uint8ClampedArray::new_with_length(4 * self.width() * self.height());
         result.copy_from(rgba_image.as_slice());
         result
+    }
+
+    pub fn get_image_data_vector(&self) -> Vec<u8> {
+        let rgba_image = self.get_rgba_matrix();
+        rgba_image.data.into()
     }
 
     /// Find periodic lines
@@ -339,38 +455,6 @@ impl ImageProcessor {
         })
     }
 
-    /// Find minimal box encompassing a symbol in the cell. Returns (left, top, width, height)
-    fn get_symbol_box(cell: &DMatrixSlice<u32>, bg_value: u32, midpoint: u32) -> SymbolBox {
-        let is_bg = |value| {
-            (bg_value <= value && value <= midpoint) || (midpoint <= value && value <= bg_value)
-        };
-        let top = cell
-            .row_iter()
-            .take_while(|row| row.column_iter().all(|value| is_bg(value[0])))
-            .count();
-        let height = cell
-            .row_iter()
-            .skip(top)
-            .take_while(|row| !row.column_iter().all(|value| is_bg(value[0])))
-            .count();
-        let left = cell
-            .column_iter()
-            .take_while(|col| col.row_iter().all(|value| is_bg(value[0])))
-            .count();
-        let width = cell
-            .column_iter()
-            .skip(left)
-            .take_while(|col| !col.row_iter().all(|value| is_bg(value[0])))
-            .count();
-
-        SymbolBox {
-            left,
-            top,
-            width,
-            height,
-        }
-    }
-
     /// Find a grid structure in given screenshot
     pub fn detect_grid(&self) -> Grid {
         // First we try to detect the grid on the screenshot
@@ -403,14 +487,18 @@ impl ImageProcessor {
         // On larger cell sizes grids have thicker borders,
         // but we can approximately pick how much to inset into the cell square
         let inset = 1 + grid.size / 15;
+        let cell_size = grid.size - inset * 2;
 
         // Grab top left cell - this will be a wall
         let wall_cell = self.pixels.slice(
             (grid.row_offset + inset, grid.col_offset + inset),
-            (grid.size - inset * 2, grid.size - inset * 2),
+            (cell_size, cell_size),
         );
-        let mut entry_candidate: (usize, u32, usize) = (0, 1000, 1000);
-        let mut treasury_candidate: (usize, usize, usize) = (0, 100, 0);
+
+        // candidates: cell id, similarity distance 
+        let mut entry_candidate: (usize, i32) = (0, 1000);
+        let mut treasury_candidate: (usize, i32) = (0, 1000);
+
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
             for col in 0..grid.col_count {
@@ -419,7 +507,7 @@ impl ImageProcessor {
                         grid.row_offset + row * grid.size + inset,
                         grid.col_offset + col * grid.size + inset,
                     ),
-                    (grid.size - inset * 2, grid.size - inset * 2),
+                    (cell_size, cell_size),
                 );
                 let diff = ImageProcessor::compare(&wall_cell, &cell);
                 if diff < (15 * grid.size as u32 * grid.size as u32) {
@@ -430,6 +518,7 @@ impl ImageProcessor {
                 } else {
                     cells.push(Cell::Pass);
                     marks.push(Mark::None);
+
                     // we'll try to detect special cells by their very special
                     // characteristics
                     let cell_avg = cell.sum() / (cell.ncols() as u32 * cell.nrows() as u32);
@@ -439,50 +528,48 @@ impl ImageProcessor {
                         // Special cells have icons, so their min/max has quite some difference.
                         // Of these special cells two are most interesting: entry and treasury.
 
-                        // First, find symbol box
                         let dark_mode = cell_avg < 128 * 3;
-                        let (cell_fg, cell_bg) = if dark_mode {
-                            (cell_max, cell_min)
+                        let mut cell_img = image::ImageBuffer::<Luma<u8>, Vec<u8>>::from_vec(
+                            cell_size as u32,
+                            cell_size as u32,
+                            cell.transpose()
+                                .map::<u8, fn(u32) -> u8>(|value| (value / 3) as u8)
+                                .reshape_generic(
+                                    Const::<1>,
+                                    Dynamic::new((cell_size * cell_size) as usize),
+                                )
+                                .data
+                                .into(),
+                        )
+                        .unwrap();
+                        if dark_mode {
+                            imageops::invert(&mut cell_img);
+                        }
+                        cell_img = imageops::resize(&cell_img, 8, 8, imageops::CatmullRom);
+                        let feature_vector = FeatureVector::from_image(&cell_img);
+                        let (detected_mark, similarity) = self.get_closest_feature(&feature_vector);
+                        if similarity <= DETECT_THRESHOLD {
+                            match detected_mark {
+                                Mark::Entrance => {
+                                    if entry_candidate.1 > similarity {
+                                        entry_candidate.0 = cells.len() - 1;
+                                    }
+                                },
+                                Mark::Treasury => {
+                                    if treasury_candidate.1 > similarity {
+                                        treasury_candidate.0 = cells.len() - 1;
+                                    }
+                                },
+                                _ => {
+                                    if let Some(last) = marks.last_mut() {
+                                        *last = detected_mark;
+                                    }
+                                }
+                            }
                         } else {
-                            (cell_min, cell_max)
-                        };
-                        let threshold = (cell_bg * 7 + cell_fg) / 8;
-                        let symbol_box = ImageProcessor::get_symbol_box(&cell, cell_bg, threshold);
-
-                        // skip low starting or badly detected symbols
-                        if symbol_box.top > cell.ncols() / 3
-                            || symbol_box.width <= 4
-                            || symbol_box.height <= 4
-                        {
-                            continue;
-                        }
-
-                        // Get a characteristic from leftmost column
-                        // (i.e. how "filled" with foreground is it)
-                        // Entrance glyph is narrow and has a long line on the left
-                        // (also for Erinome), so we check for this
-                        let glyph_first_column =
-                            cell.slice((symbol_box.top, symbol_box.left), (symbol_box.height, 1));
-                        let glyph_col_avg = glyph_first_column.sum() / symbol_box.height as u32;
-                        let sum_tl = glyph_first_column.fold(0, |acc, value| {
-                            acc + value.max(glyph_col_avg) - value.min(glyph_col_avg)
-                                // add penalty for being too much like background
-                                + 20u32.saturating_sub(cell_bg.max(value) - cell_bg.min(value))
-                        }) / symbol_box.height as u32;
-
-                        if symbol_box.width < entry_candidate.2
-                            || (symbol_box.width == entry_candidate.2 && sum_tl < entry_candidate.1)
-                            || (sum_tl < 10)
-                        {
-                            entry_candidate = (cells.len() - 1, sum_tl, symbol_box.width)
-                        }
-
-                        // Treasury glyph is higher and starts earlier than other
-                        if symbol_box.top < treasury_candidate.1
-                            || symbol_box.height > treasury_candidate.2
-                        {
-                            treasury_candidate =
-                                (cells.len() - 1, symbol_box.top, symbol_box.height)
+                            web_sys::console::log_1(
+                                &format!("At {}:{} distance {} to {:?}", col, row, similarity, detected_mark).into(),
+                            );
                         }
                     }
                 }
@@ -491,11 +578,9 @@ impl ImageProcessor {
 
         // Apply found candidates to map
         if entry_candidate.0 > 0 {
-            // cells[entry_candidate.0] = Cell::Entrance;
             marks[entry_candidate.0] = Mark::Entrance;
         }
         if treasury_candidate.0 > 0 {
-            // cells[treasury_candidate.0] = Cell::Exit;
             marks[treasury_candidate.0] = Mark::Treasury;
         }
 
@@ -522,6 +607,20 @@ impl ImageProcessor {
                 }
             }
         }
+    }
+
+    /// Find closest feature and report its distance
+    fn get_closest_feature(&self, in_vector: &FeatureVector) -> (Mark, i32) {
+        self.known_features
+            .iter()
+            .fold((Mark::None, i32::MAX), |acc, f| {
+                let dist = in_vector.distance(&f.0);
+                if dist < acc.1 {
+                    (f.1, dist)
+                } else {
+                    acc
+                }
+            })
     }
 }
 
