@@ -12,6 +12,9 @@ use crate::features::FEATURE_DATA;
 use crate::field::{Cell, Coordinate, Subway};
 
 /// Threshold for closeness to existing feature data
+///
+/// Similarity threshold depends on the length of vectors and the number
+/// of entries in "known features" database
 const DETECT_THRESHOLD: i32 = 30;
 
 #[wasm_bindgen]
@@ -570,6 +573,9 @@ impl ImageProcessor {
                                         treasury_candidate.0 = cells.len() - 1;
                                     }
                                 },
+                                Mark::Wall => {
+                                    // skip: this is a wrong mark in this context
+                                }
                                 _ => {
                                     if let Some(last) = marks.last_mut() {
                                         *last = detected_mark;
