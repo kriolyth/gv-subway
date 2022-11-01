@@ -25,6 +25,7 @@ let lastEmitted = 0.;
 const cellClass = computed(() => ({
     wall: props.cellType == Cell.Wall,
     pass: props.cellType == Cell.Pass,
+    raisedWall: props.cellType == Cell.Pass && props.mark == Mark.RaiseWall,
     inverted: (props.cellValue ?? 0) > 0.6,
     entrance: props.cellType == Cell.Entrance,
     exit: props.cellType == Cell.Exit,
@@ -38,7 +39,7 @@ const symbol = computed(() => {
         Mark.Entrance, Mark.Treasury, Mark.FinalBoss, Mark.OtherBoss].indexOf(mark) == -1) {
         mark = Mark.None
     }
-    if (cell == Cell.Pass && props.cellValue && (mark == Mark.None)) {
+    if (cell == Cell.Pass && props.cellValue && (mark == Mark.None || mark == Mark.RaiseWall)) {
         return props.cellValue.toFixed(3).replace(/^0/, '').substring(0, 4)
     } else {
         if (mark) {
@@ -80,10 +81,9 @@ function handleTouchMove(evt: TouchEvent) {
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
         @pointerdown.prevent="handleMouseMove" @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove"
-        @touchmove="handleTouchMove">{{
-        outer ? '·' : symbol }}
+        @touchmove="handleTouchMove">{{ outer ? '·' : symbol }}
     </div>
-    <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{outer ? '·' : symbol }}</div>
+    <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
 </template>
 <script lang="ts">
 // one-time setup
@@ -124,6 +124,14 @@ const colourScheme = BluePink
 
 .cell.pass.inverted {
     color: white;
+}
+
+.cell.raisedWall {
+    background-image: url(data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 64'><path d='M0 0L16 16M0 48L16 64' stroke='%23545454' stroke-width='2'/></svg>);
+}
+
+.cell.raisedWall.inverted {
+    background-image: url(data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 64'><path d='M0 0L16 16M0 48L16 64' stroke='white' stroke-width='2'/></svg>);
 }
 
 .cell.outer {
