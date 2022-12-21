@@ -13,7 +13,7 @@ import { defineComponent } from "vue";
 import { ImageProcessor } from "../pkg/gv_subway";
 
 export default defineComponent({
-    setup() {},
+    setup() { },
     data() {
         const fields = new URLSearchParams(window.location.search.substring(1));
         return {
@@ -44,7 +44,7 @@ export default defineComponent({
             pixxa.width = pasta.width * scale;
             pixxa.height = pasta.height * scale;
             pixxa
-                .getContext("2d")
+                .getContext("2d", { willReadFrequently: true })
                 ?.drawImage(pasta, 0, 0, pixxa.width, pixxa.height);
             let imageData = pixxa
                 .getContext("2d")
@@ -59,7 +59,7 @@ export default defineComponent({
                         vm.debugOutput
                     );
                     vm.processingState = "Проверяем...";
-                    let maze = processor.detect_maze(processor.detect_grid());
+                    let maze = processor.detect_maze(processor.detect_flex_grid());
                     if (maze.is_valid()) {
                         vm.processingState = "Схема получена";
                         vm.$emit("haveMaze", maze);
@@ -112,13 +112,14 @@ export default defineComponent({
 });
 </script>
 <style>
-    #paste,
-    #pixels {
-        display: none;
-    }
-    #paste.debug,
-    #pixels.debug {
-        display: block;
-        border: 1px dotted midnightblue;
-    }
+#paste,
+#pixels {
+    display: none;
+}
+
+#paste.debug,
+#pixels.debug {
+    display: block;
+    border: 1px dotted midnightblue;
+}
 </style>
