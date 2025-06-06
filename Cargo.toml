@@ -2,7 +2,7 @@
 name = "gv-subway"
 version = "0.2.0"
 authors = ["Krio Lyth <kriolyth@gmail.com>"]
-edition = "2021"
+edition = "2024"
 description = "Godville dungeon explorer"
 license = "Apache-2.0"
 repository = "https://github.com/kriolyth/gv-subway"
@@ -14,12 +14,13 @@ crate-type = ["cdylib"]
 
 [dependencies]
 wasm-bindgen = "0.2"
-nalgebra = "0.30"
+nalgebra = "0.33"
 js-sys = "0.3"
-image = { version = "0.24", default-features = false }
-imageproc = { version = "0.23.0", default-features = false }
+image = { version = "0.25", default-features = false }
+imageproc = { version = "0.25", default-features = false }
 num-rational = {version="0.4.1", features=["std"], default-features = false}
 bitvec = { version="^1", default-features=false, features=["std","alloc"] }
+jiro_nn = {version = "0.8.1", default-features = false, features = ["nalgebra"]}
 
 [dependencies.web-sys]
 version = "0.3"
@@ -27,6 +28,8 @@ features = ["console"]
 
 [dev-dependencies]
 wasm-bindgen-test = "0.3"
+jiro_nn = {version = "0.8.1", default-features = false, features = ["nalgebra"]}
+image = { version = "0.25" }
 
 [profile.release]
 panic = "abort"

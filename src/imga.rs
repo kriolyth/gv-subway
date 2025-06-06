@@ -1,11 +1,16 @@
+use std::cmp::Ordering;
 use std::fmt::{Debug, Display};
 
 use bitvec::prelude::BitArray;
-use image::{imageops, GrayImage, Luma};
+use image::{imageops, GrayImage, Luma, GenericImageView};
+use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
-use nalgebra::DMatrixSlice;
-use nalgebra::{Const, DMatrix, DVector, Dynamic};
+use nalgebra::DMatrixView;
+use nalgebra::{Const, DMatrix, DVector, Dyn};
 use wasm_bindgen::prelude::*;
+
+use jiro_nn::{model::network_model::NetworkModelBuilder};
+use jiro_nn::network::{Network, params::NetworkParams};
 
 use crate::brief::{center_mass, Brief, get_brief_vectors};
 use crate::features::FEATURE_DATA;
@@ -206,7 +211,7 @@ impl FeatureVector {
         } else {
             ((sym_min * 2 + sym_max * 5) / 7) as u8
         };
-        let binarized = imageproc::contrast::threshold(img, thresh);
+        let binarized = imageproc::contrast::threshold(img, thresh, imageproc::contrast::ThresholdType::Binary);
 
         // Find image center and encode BRIEF vector
         // Blurring allows for limited imprecise matching
@@ -274,7 +279,7 @@ impl ImageProcessor {
                 // data is given by scan lines, but nalgebra matrices are column-major,
                 // so we reshape into a transposed matrix to match the source
                 // (may remove for production)
-                .reshape_generic(Dynamic::new(width), Dynamic::new(height))
+                .reshape_generic(Dyn(width), Dyn(height))
                 .transpose(),
             known_features: FEATURE_DATA
                 .iter()
@@ -318,7 +323,7 @@ impl ImageProcessor {
             .pixels
             .transpose()
             .map::<u8, fn(u32) -> u8>(|value| (value / 3) as u8)
-            .reshape_generic(Const::<1>, Dynamic::new((width * height) as usize));
+            .reshape_generic(Const::<1>, Dyn((width * height) as usize));
         let mut rgba_image = DMatrix::<u8>::repeat(4, single_row_image.ncols(), 255);
         rgba_image.set_row(0, &single_row_image.row(0));
         rgba_image.set_row(1, &single_row_image.row(0));
@@ -375,8 +380,8 @@ impl ImageProcessor {
         for (offset, _) in cols
             .iter()
             .enumerate()
-            .take(cols.len() - INITIAL_SEEK_SIZE * (period_range.start + 1))
-            .filter(|(_index, &value)| (value < avg) ^ dark_mode)
+            .take(cols.len().saturating_sub(INITIAL_SEEK_SIZE * (period_range.start + 1)))
+            .filter(|(_index, value)| (**value < avg) ^ dark_mode)
         {
             // Iterate over acceptable periods - actual period depend on
             // screen resolution and scaling. Also note that "period" used for
@@ -426,7 +431,15 @@ impl ImageProcessor {
         let row_grid = ImageProcessor::find_grid_period(image_slice, None);
 
         if row_grid.is_none() {
+            #[cfg(target_arch="wasm32")]
             web_sys::console::log_1(&"Horizontal lines not found".into());
+            println!("Horizontal lines not found. Matrix {} x {}", image_slice.ncols(), image_slice.nrows());
+            // let cols = image_slice
+            //     .column_sum()
+            //     .map(|value| value / (3 * image_slice.ncols() as u32));
+            // println!("{:?}", cols);
+            let slc = image_slice.view((2, 2), (18,18));
+            println!("{:?}", slc.iter().map(|v| v/3).collect::<Vec<_>>());
             return None;
         }
 
@@ -439,6 +452,7 @@ impl ImageProcessor {
             .transpose();
         let col_grid = ImageProcessor::find_grid_period(&scan_part, Some(&row_grid));
         if col_grid.is_none() {
+            #[cfg(target_arch="wasm32")]
             web_sys::console::log_1(&"Vertical lines not found".into());
             return None;
         }
@@ -454,7 +468,7 @@ impl ImageProcessor {
     }
 
     /// Compare similarity between two cells of same size
-    fn compare(cell_a: &DMatrixSlice<u32>, cell_b: &DMatrixSlice<u32>) -> u32 {
+    fn compare(cell_a: &DMatrixView<u32>, cell_b: &DMatrixView<u32>) -> u32 {
         cell_a.zip_fold(cell_b, 0u32, |acc, a_value, b_value| {
             acc + a_value.max(b_value) - a_value.min(b_value)
         })
@@ -495,7 +509,7 @@ impl ImageProcessor {
         let cell_size = grid.size - inset * 2;
 
         // Grab top left cell - this will be a wall
-        let wall_cell = self.pixels.slice(
+        let wall_cell = self.pixels.view(
             (grid.row_offset + inset, grid.col_offset + inset),
             (cell_size, cell_size),
         );
@@ -507,7 +521,7 @@ impl ImageProcessor {
         // go over similar slices and check how well they compare with the wall
         for row in 0..grid.row_count {
             for col in 0..grid.col_count {
-                let cell = self.pixels.slice(
+                let cell = self.pixels.view(
                     (
                         grid.row_offset + row * grid.size + inset,
                         grid.col_offset + col * grid.size + inset,
@@ -541,7 +555,7 @@ impl ImageProcessor {
                                 .map::<u8, fn(u32) -> u8>(|value| (value / 3) as u8)
                                 .reshape_generic(
                                     Const::<1>,
-                                    Dynamic::new((cell_size * cell_size) as usize),
+                                    Dyn((cell_size * cell_size) as usize),
                                 )
                                 .data
                                 .into(),
@@ -607,7 +621,7 @@ impl ImageProcessor {
     pub fn debug_draw(&mut self, maze: &Maze) {
         for row in 0..maze.grid.row_count {
             for col in 0..maze.grid.col_count {
-                let mut cell = self.pixels.slice_mut(
+                let mut cell = self.pixels.view_mut(
                     (
                         maze.grid.row_offset + row * maze.grid.size + 1,
                         maze.grid.col_offset + col * maze.grid.size + 1,
@@ -634,11 +648,278 @@ impl ImageProcessor {
                 }
             })
     }
+
+    #[wasm_bindgen]
+    pub fn recognize_cell() -> Mark {
+        //let nn_weights = NetworkParams::from_binary_compressed("./gv_subway_nn.bin");
+        let mut nn_weights: Vec<Vec<Vec<f32>>> = Vec::new();
+        nn_weights.push(Vec::from([
+            vec![0.018279713, 0.3461362, 0.22054106, -0.22364981, -0.901315, 0.41882607],
+            vec![-0.008045531, 0.3819163, -0.32824752, 0.12131143, 0.54478514, -0.20752017], 
+            vec![-0.15599708, -0.13771185, 0.27119476, 0.5337623, -0.08216628, -0.35387617], 
+            vec![0.23947799, -0.00029348393, -0.40296182, -0.83399206, -0.528063, -0.23652445], 
+            vec![-0.7580066, -0.33036712, -0.5383008, 0.09558739, 0.30110666, 0.48766088], 
+            vec![0.28859696, 0.39982307, -0.2931427, -0.36331227, -0.22636908, 0.42259407], 
+            vec![0.57675976, -0.33459318, 0.23412874, -0.452864, -0.9032651, -0.6079217], 
+            vec![-0.01979156, -0.30330953, -1.1460474, 0.79546994, 1.2096947, -0.17616569], 
+            vec![0.19014135, 0.3176111, 0.53890294, 0.38607484, -0.18012175, 0.23491126], 
+            vec![0.01200102, -0.07919252, 0.05047029, 0.20355363, -0.44641268, 0.24467118]]));
+        nn_weights.push(Vec::from([
+            vec![-0.52755237, 0.67305976, 0.8634603, -0.24125734], 
+            vec![0.5629774, -0.35576233, 0.41369733, -0.6802983], 
+            vec![0.25178865, -0.9155079, 0.73697317, -0.75054413], 
+            vec![0.07890297, 0.6471681, -0.89126456, -0.5589374], 
+            vec![1.0503906, -0.5571312, 0.58928, -0.9909095], 
+            vec![-0.34184012, -0.87291986, 0.32032758, 0.96044314], 
+            vec![1.1638734, 0.08001668, 0.35622814, -0.5271859]]));
+        let mut network = make_network_model();
+        network.load_params(&NetworkParams(nn_weights));
+        let input: Vec<f32> = vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0];
+        let result = network.predict(&input);
+        let max = result.iter().enumerate().max_by(|(_ix1, v1), (_ix2, v2)| if v1 < v2 { Ordering::Less} else { Ordering::Greater });
+        match max {
+            Some((0, _)) => Mark::Wall,
+            Some((1, _)) => Mark::Entrance,
+            Some((2, _)) => Mark::Treasury,
+            Some(_) => Mark::Ladder,
+            None => Mark::None
+        }
+    }
+}
+
+fn make_network_model() -> Network {
+    let in_size = 9;
+    let hidden_out_size = 6;
+    let out_size = 4;
+
+    let network_model = NetworkModelBuilder::new()
+        .full_dense(hidden_out_size)
+            .init_uniform_signed()
+            .adam()
+            .tanh()
+        .end()
+        .full_dense(out_size)
+            .init_zeros()
+            .adam()
+            .softmax()
+        .end()
+    .build();
+    network_model.to_network(in_size)
+}
+
+
+#[derive(Clone, Copy)]
+struct CellDim(u32, u32, u32, u32);  // x, y, width. height (of blank interior)
+
+struct NimageProcessor {
+    pub source: image::DynamicImage,
+    pub dark_mode: bool,
+    pub seed_square: Option<CellDim>,
+}
+
+impl NimageProcessor {
+    const TOP_LEFT_CORNER: u8 = 0b11100011;
+    const TOP_RIGHT_CORNER: u8 = 0b10001111;
+    const BOTTOM_LEFT_CORNER: u8 = 0b11111000;
+    const BOTTOM_RIGHT_CORNER: u8 = 0b00111110;
+    const TOP_SIDE: u8 = 0b10000011;
+    const RIGHT_SIDE: u8 = 0b00001110;
+    // const BOTTOM_SIDE: u8 = 0b00111000;
+    const LEFT_SIDE: u8 = 0b11100000;
+    const MIN_SIZE: u32 = 8;
+
+    fn get_seed_subimage(source: &image::DynamicImage) -> (image::GrayImage, u32, u32) {
+        let window_size: u32 = source.width().min(source.height()) / 5;
+        let offset_x = (source.width() - window_size) / 2;
+        let offset_y = (source.height() - window_size) / 2;
+        let subview = source.view(offset_x, offset_y, window_size, window_size).to_image();
+        (image::imageops::grayscale(&subview), offset_x, offset_y)
+    }
+
+    fn detect_dark_mode(seed: &image::GrayImage) -> bool {
+        let avg_brightness = imageproc::stats::percentile(&seed, 50);
+        avg_brightness < 128
+    }
+
+    fn cell_full_search(bin_img: &image::GrayImage) -> Option<CellDim> {
+        enum State {
+            SearchLT,
+            SpanTopSide(u32, u32, u32),
+            TopSide(u32, u32, u32),
+            Rect(u32, u32, u32, u32)
+        }
+
+        let mut state = State::SearchLT;
+        'search: for y in 1..bin_img.height() - Self::MIN_SIZE {
+            state = State::SearchLT;
+            for x in 1..bin_img.width() - Self::MIN_SIZE {
+                let pt = imageproc::local_binary_patterns::local_binary_pattern(bin_img, x, y).unwrap();
+                state = match state {
+                    State::SearchLT => if pt == Self::TOP_LEFT_CORNER { State::SpanTopSide(x, y, 1) } else { State::SearchLT },
+                    State::SpanTopSide(a, b, w) if w < 8 => if pt != Self::TOP_SIDE { State::SearchLT } else { State::SpanTopSide(a, b, w+1) },
+                    State::SpanTopSide(a, b, w) => if pt == Self::TOP_RIGHT_CORNER { State::TopSide(a, b, w) } else if pt == Self::TOP_SIDE { State::SpanTopSide(a, b, w+1) } else { State::SearchLT },
+                    State::TopSide(a, b, w) => {
+                        // println!("{img_name}: Have top side at ({a}, {b}) length {w}");
+                        // trace sides
+                        for h in 1..=(w + 1).min(bin_img.height() - 1) {
+                            let pt_left = imageproc::local_binary_patterns::local_binary_pattern(bin_img, a, b + h).unwrap();
+                            let pt_right = imageproc::local_binary_patterns::local_binary_pattern(bin_img, a + w, b + h).unwrap();
+                            if pt_left == Self::LEFT_SIDE && pt_right == Self::RIGHT_SIDE {
+                                continue;
+                            } else if pt_left == Self::BOTTOM_LEFT_CORNER && pt_right == Self::BOTTOM_RIGHT_CORNER {
+                                // Found bottom corners, likely a rectangle
+                                state = State::Rect(a, b, w, h);
+                                break 'search;
+                            } else {
+                                // Not a valid rectangle, reset state
+                                state = State::SearchLT;
+                                break;
+                            }
+                        }
+                        state
+                    },
+                    _ => State::SearchLT
+                };
+                                    
+            }
+        }
+
+        if let State::Rect(x, y, w, h) = state {
+            // println!("{img_name}: Found square at ({x}, {y}) size ({w}, {h})");
+            Some(CellDim(x, y, w, h))
+        } else {
+            // println!("{img_name}: No seed found");
+            None
+        }        
+    }
+
+    pub fn find_seed_square(seed: &image::GrayImage, dark_mode: bool) -> Option<CellDim> {        
+        let mid = imageproc::contrast::otsu_level(seed);
+        let mut bin_img = imageproc::contrast::threshold(seed, mid,
+            if !dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
+        // Make corners less smooth, more cornery.
+        // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
+        // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
+        imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
+        imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
+
+        Self::cell_full_search(&bin_img)
+    }
+
+    pub fn new(source: image::DynamicImage) -> Self {
+        let (grey, x, y) = Self::get_seed_subimage(&source);
+        let dark_mode = Self::detect_dark_mode(&grey);
+        let mut seed_square = Self::find_seed_square(&grey, dark_mode);
+        if let Some(CellDim(a, b, _, _)) = &mut seed_square {
+            *a += x;
+            *b += y;
+        }
+        Self { source, dark_mode, seed_square }
+    }
+
+    // Find the square within the given coordinates (they are relatively close to expected new cell).
+    pub fn adjust_cell(&self, cell: Option<CellDim>) -> Option<CellDim> {
+        None
+    }
+
+}
+
+#[derive(Clone, Copy)]
+struct ExploreCell {
+    pub position: (i8, i8),
+    pub cell: Option<CellDim>
+}
+
+impl ExploreCell {
+    const GUTTER: u32 = 4;
+    pub fn left(&self) ->ExploreCell {
+        let cell = match self.cell {
+            Some(c) => {
+                if c.0 < c.2 { None }
+                else {
+                    Some(CellDim((c.0 - c.2).saturating_sub(Self::GUTTER), c.1.saturating_sub(Self::GUTTER/2), c.2 + Self::GUTTER * 2, c.3 + Self::GUTTER))
+                }
+            },
+            None => None
+        };
+        ExploreCell { position: (self.position.0 - 1, self.position.1), cell }
+    }
+    pub fn top(&self) -> ExploreCell {
+        let cell = match self.cell {
+            Some(c) => {
+                if c.1 < c.3 { None }
+                else {
+                    Some(CellDim(c.0.saturating_sub(Self::GUTTER/2), (c.1 - c.3).saturating_sub(Self::GUTTER), c.2 + Self::GUTTER, c.3 + Self::GUTTER * 2))
+                }
+            },
+            None => None
+        };
+        ExploreCell { position: (self.position.0, self.position.1 - 1), cell }
+    }
+
+    pub fn right(&self) -> ExploreCell {
+        let cell = match self.cell {
+            Some(c) => {
+                Some(CellDim(c.0 + c.2, c.1.saturating_sub(Self::GUTTER/2), c.2 + Self::GUTTER * 2, c.3 + Self::GUTTER))
+            },
+            None => None
+        };
+        ExploreCell { position: (self.position.0 + 1, self.position.1), cell }
+    }
+
+    pub fn bottom(&self) -> ExploreCell {
+        let cell = match self.cell {
+            Some(c) => {
+                Some(CellDim(c.0.saturating_sub(Self::GUTTER/2), c.1 + c.3, c.2 + Self::GUTTER, c.3 + Self::GUTTER * 2))
+            },
+            None => None
+        };
+        ExploreCell { position: (self.position.0, self.position.1 + 1), cell }
+    }
+}
+
+struct Explorer {
+    pub queue: Vec<ExploreCell>,
+    pub cursor: usize,
+}
+
+impl Explorer {
+    pub fn new(cell: CellDim) -> Explorer {
+        let expl_cell = ExploreCell{ cell: Some(cell), position: (0,0) };
+        Explorer {
+            queue: vec![expl_cell],
+            cursor: 0
+        }
+    }
+
+    pub fn current(&self) -> Option<ExploreCell> {
+        if self.cursor < self.queue.len() {
+            Some(self.queue[self.cursor])
+        } else {
+            None
+        }
+    }
+
+    pub fn advance(&mut self) {
+        self.cursor += 1;
+    }
+
+    pub fn enqueue(&mut self, cell: ExploreCell) {
+        if cell.cell.is_some() {
+            if self.queue.iter().find(|&&c| c.position == cell.position).is_none() {
+                self.queue.push(cell);
+            }
+        }
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::{ops::{Deref, Rem}, str::FromStr};
+
     use super::*;
+    use image::{GenericImage, GenericImageView, SubImage};
+    use imageproc::contrast::ThresholdType;
     use wasm_bindgen_test::*;
 
     #[wasm_bindgen_test]
@@ -682,5 +963,130 @@ mod tests {
             arr.to_vec(),
             vec![2, 2, 2, 255, 6, 6, 6, 255, 10, 10, 10, 255, 14, 14, 14, 255]
         );
+    }
+
+    fn make_image_grid(dim: (u32, u32), cell_size: u32, pad: (u32, u32), thickness: u32) -> (Vec<u8>, usize, usize) {
+        let mut result = Vec::<u8>::new();
+        let total_width = pad.0 * 2 + dim.0 * cell_size + thickness;
+        let total_height = pad.1 * 2 + dim.1 * cell_size + thickness;
+        result.resize((4 * total_width * total_height) as usize, 255);
+        for x in 0..total_width - pad.0 * 2 {
+            for y in 0..total_height - pad.1 * 2 {
+                let index = (pad.0 + x + (pad.1 + y) * total_width) as usize;
+                let is_border = ((x.rem(cell_size) < thickness) || (y.rem(cell_size) < thickness))
+                    && (x.saturating_sub(thickness) / cell_size < dim.0)
+                    && (y.saturating_sub(thickness) / cell_size < dim.1);
+                if is_border {
+                    result[index * 4] = 16;
+                    result[index * 4+1] = 16;
+                    result[index * 4+2] = 16;
+                    result[index * 4+3] = 0;
+                } else {
+                    result[index * 4] = 241;
+                    result[index * 4+1] = 241;
+                    result[index * 4+2] = 241;
+                    result[index * 4+3] = 0;
+                }
+            }
+        }
+        (result, total_width as usize, total_height as usize)
+    }
+    #[test]
+    #[ignore]
+    fn construct_processor() {
+        let (img_data, width, height) = make_image_grid((6,9), 15, (8, 3), 2);
+        let proc = ImageProcessor::from_rgba_slice(width, height, &img_data);
+        let grid = proc.detect_grid();
+        assert_eq!(grid.size, 15);
+        assert_eq!(grid.row_offset, 3);
+        assert_eq!(grid.col_offset, 8);
+        assert_eq!(grid.row_count, 7);
+        assert_eq!(grid.col_count, 6);
+    }
+
+    #[test]
+    #[ignore]
+    fn make_nn() {
+        use jiro_nn::{loss::Losses, model::network_model::NetworkModelBuilder};
+        let mut training_data_in = vec![
+            vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0],
+            vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
+            vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0],
+            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
+        ];
+
+        let mut training_data_out = vec![
+            vec![1.0, 0.0, 0.0, 0.0], 
+            vec![0.0, 1.0, 0.0, 0.0], 
+            vec![0.0, 0.0, 1.0, 0.0], 
+            vec![0.0, 0.0, 0.0, 1.0],
+        ];
+        for i in 0..4 {
+            training_data_in.push(training_data_in[i].iter().map(|f| 1.0 - f).collect());
+            training_data_out.push(training_data_out[i].clone());
+        }
+
+        let in_size = 9;
+        let hidden_out_size = 6;
+        let out_size = 4;
+
+        let mut network = make_network_model();
+
+        let loss = Losses::MSE.to_loss();
+        let batch_size = 4;
+
+        for epoch in 0..20000 {
+            let error = network.train(
+                epoch,
+                &training_data_in,
+                &training_data_out,
+                &loss,
+                batch_size,
+            );
+
+            if epoch % 1000 == 0 {
+                println!("Epoch: {} Average training loss: {}", epoch, error);
+            }
+        }
+
+        network.get_params().to_binary_compressed("./gv_subway_nn.bin");
+        println!("{:?}", network.get_params().0);
+        println!("Predict 1: {:?}", network.predict(&training_data_in[0]));
+        println!("Predict 2: {:?}", network.predict(&vec![0.1, 0.09, 0.11, 0.94, 0.8, 0.75, 0.12, 0.14, 0.02]));
+
+    }
+
+    #[test]
+    fn split_img() {
+        use image::ImageReader;
+
+        for entry in std::fs::read_dir("./data/mazes").unwrap() {
+            let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
+            let img = ImageReader::open(entry.as_ref().unwrap().path()).unwrap().decode().unwrap();
+            let proc = NimageProcessor::new(img);
+
+            // let mut new_file = std::path::Path::new("./data/proc").join(entry.as_ref().unwrap().file_name());
+            // new_file.set_extension("png");
+            // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
+
+            if let Some(CellDim(x, y, w, h)) = proc.seed_square {
+                println!("{img_name}: Found square at ({x}, {y}) size ({w}, {h})");
+            } else {
+                println!("{img_name}: No seed found");
+                continue;
+            }
+
+            let mut expl = Explorer::new(proc.seed_square.unwrap());
+            while let Some(cur) = expl.current() {
+                for neighbour in [cur.left(), cur.top(), cur.right(), cur.bottom()].iter() {
+                    if let Some(adjusted_dim) = proc.adjust_cell(neighbour.cell) {
+                        expl.enqueue(ExploreCell { position: neighbour.position, cell: Some(adjusted_dim) });
+                    }
+                }
+                expl.advance();
+            }
+
+            println!("{img_name}: Found {} cells", expl.cursor);
+        }
     }
 }
