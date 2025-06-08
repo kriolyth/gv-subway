@@ -712,7 +712,9 @@ fn make_network_model() -> Network {
 struct CellDim(u32, u32, u32, u32);  // x, y, width. height (of blank interior)
 
 struct NimageProcessor {
+    pub name: String,
     pub source: image::DynamicImage,
+    pub otsu_level: u8,
     pub dark_mode: bool,
     pub seed_square: Option<CellDim>,
 }
@@ -729,7 +731,7 @@ impl NimageProcessor {
     const MIN_SIZE: u32 = 8;
 
     fn get_seed_subimage(source: &image::DynamicImage) -> (image::GrayImage, u32, u32) {
-        let window_size: u32 = source.width().min(source.height()) / 5;
+        let window_size: u32 = source.width().min(source.height()) / 3;
         let offset_x = (source.width() - window_size) / 2;
         let offset_y = (source.height() - window_size) / 2;
         let subview = source.view(offset_x, offset_y, window_size, window_size).to_image();
@@ -750,9 +752,9 @@ impl NimageProcessor {
         }
 
         let mut state = State::SearchLT;
-        'search: for y in 1..bin_img.height() - Self::MIN_SIZE {
+        'search: for y in 1..bin_img.height().saturating_sub(Self::MIN_SIZE) {
             state = State::SearchLT;
-            for x in 1..bin_img.width() - Self::MIN_SIZE {
+            for x in 1..bin_img.width() - 1 {
                 let pt = imageproc::local_binary_patterns::local_binary_pattern(bin_img, x, y).unwrap();
                 state = match state {
                     State::SearchLT => if pt == Self::TOP_LEFT_CORNER { State::SpanTopSide(x, y, 1) } else { State::SearchLT },
@@ -761,14 +763,14 @@ impl NimageProcessor {
                     State::TopSide(a, b, w) => {
                         // println!("{img_name}: Have top side at ({a}, {b}) length {w}");
                         // trace sides
-                        for h in 1..=(w + 1).min(bin_img.height() - 1) {
+                        for h in 1..(w + 2).min((bin_img.height() - 1).saturating_sub(b)) {
                             let pt_left = imageproc::local_binary_patterns::local_binary_pattern(bin_img, a, b + h).unwrap();
                             let pt_right = imageproc::local_binary_patterns::local_binary_pattern(bin_img, a + w, b + h).unwrap();
                             if pt_left == Self::LEFT_SIDE && pt_right == Self::RIGHT_SIDE {
                                 continue;
                             } else if pt_left == Self::BOTTOM_LEFT_CORNER && pt_right == Self::BOTTOM_RIGHT_CORNER {
                                 // Found bottom corners, likely a rectangle
-                                state = State::Rect(a, b, w, h);
+                                state = State::Rect(a, b, w + 1, h + 1);
                                 break 'search;
                             } else {
                                 // Not a valid rectangle, reset state
@@ -798,28 +800,67 @@ impl NimageProcessor {
         let mut bin_img = imageproc::contrast::threshold(seed, mid,
             if !dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
         // Make corners less smooth, more cornery.
+        bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
         // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
         // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
         imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
         imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
+        bin_img = imageops::resize(&bin_img, bin_img.width() / 2, bin_img.height() / 2, imageops::FilterType::Nearest);
 
         Self::cell_full_search(&bin_img)
     }
 
-    pub fn new(source: image::DynamicImage) -> Self {
+    pub fn new(name: &str, source: image::DynamicImage) -> Self {
         let (grey, x, y) = Self::get_seed_subimage(&source);
+        let otsu = imageproc::contrast::otsu_level(&grey);
         let dark_mode = Self::detect_dark_mode(&grey);
         let mut seed_square = Self::find_seed_square(&grey, dark_mode);
         if let Some(CellDim(a, b, _, _)) = &mut seed_square {
             *a += x;
             *b += y;
         }
-        Self { source, dark_mode, seed_square }
+        Self { name: name.to_owned(), source, otsu_level: otsu, dark_mode, seed_square }
     }
 
     // Find the square within the given coordinates (they are relatively close to expected new cell).
-    pub fn adjust_cell(&self, cell: Option<CellDim>) -> Option<CellDim> {
-        None
+    pub fn adjust_cell(&self, cell: &CellDim) -> Option<CellDim> {
+        //  println!("  Search in ({}, {}) size ({}, {})", cell.0, cell.1, cell.2, cell.3);
+        let max_rest_width = (self.source.width() - cell.0).min(cell.2);
+        let max_rest_height = (self.source.height() - cell.1).min(cell.3);
+        if (max_rest_width < Self::MIN_SIZE) || (max_rest_width < Self::MIN_SIZE) { return None; }
+
+        let subview = self.source.view(cell.0, cell.1, max_rest_width, max_rest_height).to_image();
+        let grey = image::imageops::grayscale(&subview);
+        
+        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.0, cell.1));
+        // grey.save_with_format(new_file, image::ImageFormat::Png).ok();
+
+        // test save
+        // let mid = imageproc::contrast::otsu_level(&grey);
+        // let mut bin_img = imageproc::contrast::threshold(&grey, mid,
+        //     if !self.dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
+        
+        // bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
+        // // Make corners less smooth, more cornery.
+        // // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
+        // // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
+        // imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
+        // imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
+        // bin_img = imageops::resize(&bin_img, bin_img.width() / 2, bin_img.height() / 2, imageops::FilterType::Nearest);
+
+        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}b.png", cell.0, cell.1));
+        // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
+
+        let result = Self::find_seed_square(&grey, self.dark_mode)
+            .map(|c| CellDim(c.0 + cell.0, c.1 + cell.1, c.2, c.3));
+
+        if result.is_none() {
+            let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.0, cell.1));
+            grey.save_with_format(new_file, image::ImageFormat::Png).ok();
+        }
+
+        result
+
     }
 
 }
@@ -831,7 +872,7 @@ struct ExploreCell {
 }
 
 impl ExploreCell {
-    const GUTTER: u32 = 4;
+    const GUTTER: u32 = 7;
     pub fn left(&self) ->ExploreCell {
         let cell = match self.cell {
             Some(c) => {
@@ -904,11 +945,40 @@ impl Explorer {
         self.cursor += 1;
     }
 
+    pub fn visited(&self, cell: &ExploreCell) -> bool {
+        self.queue.iter().find(|&&c| c.position == cell.position).is_some()
+    }
+
     pub fn enqueue(&mut self, cell: ExploreCell) {
-        if cell.cell.is_some() {
-            if self.queue.iter().find(|&&c| c.position == cell.position).is_none() {
-                self.queue.push(cell);
+        if cell.cell.is_some() && !self.visited(&cell) {
+            self.queue.push(cell);
+        }
+    }
+
+    pub fn print_layout(&self) {
+        let (min, max) = self.queue.iter().fold(((0,0),(0,0)), |acc, cell| {
+            let min_corner = (acc.0.0.min(cell.position.0), acc.0.1.min(cell.position.1));
+            let max_corner = (acc.1.0.max(cell.position.0), acc.1.1.max(cell.position.1));
+            (min_corner, max_corner)
+        });
+        let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
+        println!("  Detected size {}x{} ({} cells), min ({}, {}), max ({}, {})", size.0, size.1, size.0 as usize * size.1 as usize,
+            min.0, min.1, max.0, max.1);
+        let mut m = nalgebra::DMatrix::<u8>::default().resize(size.0 as usize, size.1 as usize, 0);
+        for cell in &self.queue {
+            let pos = ((cell.position.0 - min.0) as usize, (cell.position.1 - min.1) as usize);
+            if let Some(p_item) = m.get_mut(pos) {
+                *p_item = if cell.cell.is_none() {0} else {1};
             }
+        }
+        m = m.transpose();
+
+        for row in m.row_iter() {
+            let mut s = String::with_capacity(size.0 as usize);
+            for &i in row {
+                s.push( if i == 0 { '⬛' } else { '⬜' } );
+            }
+            println!("  {s}");
         }
     }
 }
@@ -1062,8 +1132,9 @@ mod tests {
 
         for entry in std::fs::read_dir("./data/mazes").unwrap() {
             let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
+            if img_name != "4-eri.png" {continue};
             let img = ImageReader::open(entry.as_ref().unwrap().path()).unwrap().decode().unwrap();
-            let proc = NimageProcessor::new(img);
+            let proc = NimageProcessor::new(&img_name, img);
 
             // let mut new_file = std::path::Path::new("./data/proc").join(entry.as_ref().unwrap().file_name());
             // new_file.set_extension("png");
@@ -1078,8 +1149,12 @@ mod tests {
 
             let mut expl = Explorer::new(proc.seed_square.unwrap());
             while let Some(cur) = expl.current() {
-                for neighbour in [cur.left(), cur.top(), cur.right(), cur.bottom()].iter() {
-                    if let Some(adjusted_dim) = proc.adjust_cell(neighbour.cell) {
+                // if let Some(cur_cell) = cur.cell {
+                //     println!("  Processing [{} {}]: ({}, {}) size ({}, {})", cur.position.0, cur.position.1, cur_cell.0, cur_cell.1, cur_cell.2, cur_cell.3);
+                // }
+                for neighbour in [cur.left(), cur.top(), cur.right(), cur.bottom()].iter().filter(|&&x| x.cell.is_some()) {
+                    if expl.visited(neighbour) { continue; }
+                    if let Some(adjusted_dim) = proc.adjust_cell(&neighbour.cell.unwrap()) {
                         expl.enqueue(ExploreCell { position: neighbour.position, cell: Some(adjusted_dim) });
                     }
                 }
@@ -1087,6 +1162,7 @@ mod tests {
             }
 
             println!("{img_name}: Found {} cells", expl.cursor);
+            expl.print_layout();
         }
     }
 }
