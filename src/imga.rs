@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display};
+use std::fmt::{Debug, Display, Write};
 
 use bitvec::prelude::BitArray;
 use image::{imageops, GrayImage, Luma, GenericImageView};
@@ -708,8 +708,98 @@ fn make_network_model() -> Network {
 }
 
 
+/// Dimensions of white space inside a cell
 #[derive(Clone, Copy)]
-struct CellDim(u32, u32, u32, u32);  // x, y, width. height (of blank interior)
+struct CellDim {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Copy)]
+struct UnalignedCellDim {
+    x: u32,
+    y: u32,
+    width: u32,
+    height: u32,
+}
+
+#[derive(Clone, Copy)]
+enum ExploreDirection {
+    Left, Right, Up, Down
+}
+
+impl Display for CellDim {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_fmt(format_args!("({}, {}) size {}x{}", self.x, self.y, self.width, self.height))
+    }
+}
+
+impl CellDim {
+    pub fn offset(&self, dir: ExploreDirection, gutter: (u32, u32), clip_rect: (u32, u32, u32, u32)) -> Option<UnalignedCellDim> {
+        // Start with the current cell's coordinates and size
+        let (mut x, mut y, mut width, mut height) = (self.x, self.y, self.width, self.height);
+        const BORDER_DIV: u32 = 8;
+
+        // Move in the specified direction by the cell's width/height
+        match dir {
+            ExploreDirection::Left => {
+            x = x.saturating_sub(width + width / BORDER_DIV);
+            }
+            ExploreDirection::Right => {
+            x = x.saturating_add(width + width / BORDER_DIV);
+            }
+            ExploreDirection::Up => {
+            y = y.saturating_sub(height + height / BORDER_DIV);
+            }
+            ExploreDirection::Down => {
+            y = y.saturating_add(height + height / BORDER_DIV);
+            }
+        }
+
+        // Enlarge by gutter in all directions
+        x = x.saturating_sub(gutter.0);
+        y = y.saturating_sub(gutter.1);
+        width += gutter.0 * 2;
+        height += gutter.1 * 2;
+
+        // Clip against clip_rect (left, top, right, bottom)
+        let left = clip_rect.0;
+        let top = clip_rect.1;
+        let right = clip_rect.2;
+        let bottom = clip_rect.3;
+
+        if x < left {
+            let diff = left - x;
+            x = left;
+            width = width.saturating_sub(diff);
+        }
+        if y < top {
+            let diff = top - y;
+            y = top;
+            height = height.saturating_sub(diff);
+        }
+        if x + width > right {
+            width = right.saturating_sub(x);
+        }
+        if y + height > bottom {
+            height = bottom.saturating_sub(y);
+        }
+
+        if match dir {
+            ExploreDirection::Left => self.x - x <= self.width,
+            ExploreDirection::Right => (x + width) - (self.x + self.width) <= self.width,
+            ExploreDirection::Up => self.y - y <= self.height,
+            ExploreDirection::Down => (y + height) - (self.y + self.height) <= self.height
+        } { None }
+        else {
+            Some(UnalignedCellDim { x, y, width, height })
+        }
+    }
+}
+
+
 
 struct NimageProcessor {
     pub name: String,
@@ -787,20 +877,20 @@ impl NimageProcessor {
         }
 
         if let State::Rect(x, y, w, h) = state {
-            // println!("{img_name}: Found square at ({x}, {y}) size ({w}, {h})");
-            Some(CellDim(x, y, w, h))
+            Some(CellDim { x, y, width: w, height: h })
         } else {
-            // println!("{img_name}: No seed found");
             None
-        }        
+        }
     }
 
     pub fn find_seed_square(seed: &image::GrayImage, dark_mode: bool) -> Option<CellDim> {        
         let mid = imageproc::contrast::otsu_level(seed);
         let mut bin_img = imageproc::contrast::threshold(seed, mid,
             if !dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
+        
         // Make corners less smooth, more cornery.
         bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
+        
         // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
         // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
         imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
@@ -815,7 +905,7 @@ impl NimageProcessor {
         let otsu = imageproc::contrast::otsu_level(&grey);
         let dark_mode = Self::detect_dark_mode(&grey);
         let mut seed_square = Self::find_seed_square(&grey, dark_mode);
-        if let Some(CellDim(a, b, _, _)) = &mut seed_square {
+        if let Some(CellDim { x: a, y: b, .. }) = &mut seed_square {
             *a += x;
             *b += y;
         }
@@ -823,14 +913,14 @@ impl NimageProcessor {
     }
 
     // Find the square within the given coordinates (they are relatively close to expected new cell).
-    pub fn adjust_cell(&self, cell: &CellDim) -> Option<CellDim> {
-        //  println!("  Search in ({}, {}) size ({}, {})", cell.0, cell.1, cell.2, cell.3);
-        let max_rest_width = (self.source.width() - cell.0).min(cell.2);
-        let max_rest_height = (self.source.height() - cell.1).min(cell.3);
+    pub fn align_cell(&self, cell: &UnalignedCellDim) -> Option<CellDim> {
+        let max_rest_width = (self.source.width() - cell.x).min(cell.width);
+        let max_rest_height = (self.source.height() - cell.y).min(cell.height);
         if (max_rest_width < Self::MIN_SIZE) || (max_rest_width < Self::MIN_SIZE) { return None; }
 
-        let subview = self.source.view(cell.0, cell.1, max_rest_width, max_rest_height).to_image();
+        let subview = self.source.view(cell.x, cell.y, max_rest_width, max_rest_height).to_image();
         let grey = image::imageops::grayscale(&subview);
+
         
         // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.0, cell.1));
         // grey.save_with_format(new_file, image::ImageFormat::Png).ok();
@@ -851,72 +941,67 @@ impl NimageProcessor {
         // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}b.png", cell.0, cell.1));
         // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
 
-        let result = Self::find_seed_square(&grey, self.dark_mode)
-            .map(|c| CellDim(c.0 + cell.0, c.1 + cell.1, c.2, c.3));
+        let mut result = Self::find_seed_square(&grey, self.dark_mode)
+            .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
 
         if result.is_none() {
-            let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.0, cell.1));
-            grey.save_with_format(new_file, image::ImageFormat::Png).ok();
+            let ada_img = imageproc::contrast::adaptive_threshold(&grey, 1);
+            result = Self::find_seed_square(&ada_img, self.dark_mode)
+                .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
+
+            // if result.is_none() {            
+            //     let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.x, cell.y));
+            //     ada_img.save_with_format(new_file, image::ImageFormat::Png).ok();
+            // }
+
         }
 
         result
+    }
+}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct CellMazePos {
+    pub x: i8,
+    pub y: i8
+}
+
+impl CellMazePos {
+    pub fn left(&self) -> Self {
+        Self { x: self.x - 1, y: self.y }
+    }
+    pub fn up(&self) -> Self {
+        Self { x: self.x, y: self.y - 1 }
+    }
+    pub fn right(&self) -> Self {
+        Self { x: self.x + 1, y: self.y }
+    }
+    pub fn down(&self) -> Self {
+        Self { x: self.x, y: self.y + 1 }
+    }
+    pub fn zero() -> Self {
+        Self { x: 0, y: 0 }
     }
 
+    pub fn offset(&self, dir: ExploreDirection) -> Self {
+        match dir {
+            ExploreDirection::Left => self.left(),
+            ExploreDirection::Right => self.right(),
+            ExploreDirection::Up => self.up(),
+            ExploreDirection::Down => self.down()
+        }
+    }
 }
 
 #[derive(Clone, Copy)]
 struct ExploreCell {
-    pub position: (i8, i8),
-    pub cell: Option<CellDim>
+    pub position: CellMazePos,
+    pub cell: CellDim
 }
 
-impl ExploreCell {
-    const GUTTER: u32 = 7;
-    pub fn left(&self) ->ExploreCell {
-        let cell = match self.cell {
-            Some(c) => {
-                if c.0 < c.2 { None }
-                else {
-                    Some(CellDim((c.0 - c.2).saturating_sub(Self::GUTTER), c.1.saturating_sub(Self::GUTTER/2), c.2 + Self::GUTTER * 2, c.3 + Self::GUTTER))
-                }
-            },
-            None => None
-        };
-        ExploreCell { position: (self.position.0 - 1, self.position.1), cell }
-    }
-    pub fn top(&self) -> ExploreCell {
-        let cell = match self.cell {
-            Some(c) => {
-                if c.1 < c.3 { None }
-                else {
-                    Some(CellDim(c.0.saturating_sub(Self::GUTTER/2), (c.1 - c.3).saturating_sub(Self::GUTTER), c.2 + Self::GUTTER, c.3 + Self::GUTTER * 2))
-                }
-            },
-            None => None
-        };
-        ExploreCell { position: (self.position.0, self.position.1 - 1), cell }
-    }
-
-    pub fn right(&self) -> ExploreCell {
-        let cell = match self.cell {
-            Some(c) => {
-                Some(CellDim(c.0 + c.2, c.1.saturating_sub(Self::GUTTER/2), c.2 + Self::GUTTER * 2, c.3 + Self::GUTTER))
-            },
-            None => None
-        };
-        ExploreCell { position: (self.position.0 + 1, self.position.1), cell }
-    }
-
-    pub fn bottom(&self) -> ExploreCell {
-        let cell = match self.cell {
-            Some(c) => {
-                Some(CellDim(c.0.saturating_sub(Self::GUTTER/2), c.1 + c.3, c.2 + Self::GUTTER, c.3 + Self::GUTTER * 2))
-            },
-            None => None
-        };
-        ExploreCell { position: (self.position.0, self.position.1 + 1), cell }
-    }
+struct MaybeExploreCell {
+    pub position: CellMazePos,
+    pub cell: UnalignedCellDim
 }
 
 struct Explorer {
@@ -926,7 +1011,7 @@ struct Explorer {
 
 impl Explorer {
     pub fn new(cell: CellDim) -> Explorer {
-        let expl_cell = ExploreCell{ cell: Some(cell), position: (0,0) };
+        let expl_cell = ExploreCell{ cell, position: CellMazePos::zero() };
         Explorer {
             queue: vec![expl_cell],
             cursor: 0
@@ -945,20 +1030,20 @@ impl Explorer {
         self.cursor += 1;
     }
 
-    pub fn visited(&self, cell: &ExploreCell) -> bool {
-        self.queue.iter().find(|&&c| c.position == cell.position).is_some()
+    pub fn visited(&self, position: &CellMazePos) -> bool {
+        self.queue.iter().find(|&&c| c.position == *position).is_some()
     }
 
     pub fn enqueue(&mut self, cell: ExploreCell) {
-        if cell.cell.is_some() && !self.visited(&cell) {
+        if !self.visited(&cell.position) {
             self.queue.push(cell);
         }
     }
 
     pub fn print_layout(&self) {
         let (min, max) = self.queue.iter().fold(((0,0),(0,0)), |acc, cell| {
-            let min_corner = (acc.0.0.min(cell.position.0), acc.0.1.min(cell.position.1));
-            let max_corner = (acc.1.0.max(cell.position.0), acc.1.1.max(cell.position.1));
+            let min_corner = (acc.0.0.min(cell.position.x), acc.0.1.min(cell.position.y));
+            let max_corner = (acc.1.0.max(cell.position.x), acc.1.1.max(cell.position.y));
             (min_corner, max_corner)
         });
         let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
@@ -966,9 +1051,9 @@ impl Explorer {
             min.0, min.1, max.0, max.1);
         let mut m = nalgebra::DMatrix::<u8>::default().resize(size.0 as usize, size.1 as usize, 0);
         for cell in &self.queue {
-            let pos = ((cell.position.0 - min.0) as usize, (cell.position.1 - min.1) as usize);
+            let pos = ((cell.position.x - min.0) as usize, (cell.position.y - min.1) as usize);
             if let Some(p_item) = m.get_mut(pos) {
-                *p_item = if cell.cell.is_none() {0} else {1};
+                *p_item = 1;
             }
         }
         m = m.transpose();
@@ -1132,33 +1217,34 @@ mod tests {
 
         for entry in std::fs::read_dir("./data/mazes").unwrap() {
             let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
-            if img_name != "4-eri.png" {continue};
+            // if img_name != "4-eri.png" {continue};
             let img = ImageReader::open(entry.as_ref().unwrap().path()).unwrap().decode().unwrap();
             let proc = NimageProcessor::new(&img_name, img);
 
-            // let mut new_file = std::path::Path::new("./data/proc").join(entry.as_ref().unwrap().file_name());
-            // new_file.set_extension("png");
-            // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
-
-            if let Some(CellDim(x, y, w, h)) = proc.seed_square {
-                println!("{img_name}: Found square at ({x}, {y}) size ({w}, {h})");
+            if let Some(cell) = proc.seed_square {
+                println!("{img_name}: Found square {cell}");
             } else {
                 println!("{img_name}: No seed found");
                 continue;
             }
 
+            let clip_rect = (0u32, 0u32, proc.source.width(), proc.source.height());
             let mut expl = Explorer::new(proc.seed_square.unwrap());
             while let Some(cur) = expl.current() {
-                // if let Some(cur_cell) = cur.cell {
-                //     println!("  Processing [{} {}]: ({}, {}) size ({}, {})", cur.position.0, cur.position.1, cur_cell.0, cur_cell.1, cur_cell.2, cur_cell.3);
-                // }
-                for neighbour in [cur.left(), cur.top(), cur.right(), cur.bottom()].iter().filter(|&&x| x.cell.is_some()) {
-                    if expl.visited(neighbour) { continue; }
-                    if let Some(adjusted_dim) = proc.adjust_cell(&neighbour.cell.unwrap()) {
-                        expl.enqueue(ExploreCell { position: neighbour.position, cell: Some(adjusted_dim) });
+                for dir in [ExploreDirection::Left, ExploreDirection::Up, ExploreDirection::Right, ExploreDirection::Down] {
+                    let next_pos = cur.position.offset(dir);
+                    if expl.visited(&next_pos) { continue; }
+
+                    let maybe_next_cell = cur.cell.offset(dir, (cur.cell.width / 4, cur.cell.height / 4), clip_rect);
+                    if let Some(next_cell) = maybe_next_cell {
+                        if let Some(aligned_cell) = proc.align_cell(&next_cell) {
+                            // println!("  Enq: {}", aligned_cell);
+                            expl.enqueue(ExploreCell { position: next_pos, cell: aligned_cell });
+                        }
                     }
                 }
                 expl.advance();
+                // println!("  Q: {} / pos {}, at ({}, {})", expl.queue.len(), expl.cursor, cur.position.x, cur.position.y);
             }
 
             println!("{img_name}: Found {} cells", expl.cursor);
