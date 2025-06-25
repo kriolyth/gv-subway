@@ -912,6 +912,91 @@ impl NimageProcessor {
         Self { name: name.to_owned(), source, otsu_level: otsu, dark_mode, seed_square }
     }
 
+    fn find_best_lbp(bin_img: &image::GrayImage, pattern: u8, area: (core::ops::Range<u32>, core::ops::Range<u32>), default: (u32, u32)) -> (u32, u32) {
+        for x in area.0 {
+            for y in area.1.clone() {
+                let pt = imageproc::local_binary_patterns::local_binary_pattern(bin_img, x, y).unwrap();
+                if pt == pattern {
+                    return (x, y);
+                }
+            }
+        }
+        default
+    }
+
+    fn find_inner_border_offset(int_img: &image::ImageBuffer<Luma<u32>, Vec<u32>>, direction: ExploreDirection, range: u32) -> Option<u32> {
+        let mut dip_offset = None;
+        for offset in 0..=range {
+            let (left, top, right, bottom) = match direction {
+                    ExploreDirection::Left => (offset, 0, offset, int_img.height() - 2),
+                    ExploreDirection::Right => (int_img.width() - 2 - offset, 0, int_img.width() - 2 - offset, int_img.height() - 2),
+                    ExploreDirection::Up => (0, offset, int_img.width() - 2, offset),
+                    ExploreDirection::Down => (0, int_img.height() - 2 - offset, int_img.width() - 2, int_img.height() - 2 - offset)
+            };
+            let value = imageproc::integral_image::sum_image_pixels(&int_img, left, top, right, bottom).as_ref()[0] / 255;
+            if value <= 2 {
+                dip_offset = Some(match direction {
+                    ExploreDirection::Left => offset + 1,
+                    ExploreDirection::Right => int_img.width() - 2 - (offset+1),
+                    ExploreDirection::Up => offset + 1,
+                    ExploreDirection::Down => int_img.height() - 2 - (offset+1),
+                });
+            } else if dip_offset.is_some() {
+                break;
+            }
+        }
+        dip_offset
+    }
+
+    fn align_corners(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
+        let range = cell.width / 4;
+        let r_left = 1..(range + 1);
+        let r_right = (bin_img.width() - range - 1)..(bin_img.width() - 1);
+        let r_top = 1..(range + 1);
+        let r_bottom = (bin_img.height() - range - 1)..(bin_img.height() - 1);
+
+        let left_top = Self::find_best_lbp(bin_img, Self::TOP_LEFT_CORNER, (r_left.clone(), r_top.clone()), (r_left.end, r_top.end));
+        let right_top = Self::find_best_lbp(bin_img, Self::TOP_RIGHT_CORNER, (r_right.clone(), r_top.clone()), (r_right.start, r_top.end));
+        let left_bot = Self::find_best_lbp(bin_img, Self::BOTTOM_LEFT_CORNER, (r_left.clone(), r_bottom.clone()), (r_left.end, r_bottom.start));
+        let right_bot = Self::find_best_lbp(bin_img, Self::BOTTOM_RIGHT_CORNER, (r_right.clone(), r_bottom.clone()), (r_right.start, r_bottom.start));
+        
+        let left = left_top.0.max(left_bot.0);
+        let right = right_top.0.min(right_bot.0);
+        let top = left_top.1.max(right_top.1);
+        let bottom = left_bot.1.min(right_bot.1);
+
+        let width = right - left;
+        let height = bottom - top;
+        if width.abs_diff(cell.width) > 2 || height.abs_diff(cell.height) > 2 {
+            None
+        } else {
+            Some(CellDim { x: left, y: top, width, height })
+        }
+    }
+
+    fn align_borders(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
+        let range = cell.width / 4;
+
+        let integral = imageproc::integral_image::integral_image::<_, u32>(&bin_img);
+        let left = Self::find_inner_border_offset(&integral, ExploreDirection::Left, range);
+        let right = Self::find_inner_border_offset(&integral, ExploreDirection::Right, range);
+        let top = Self::find_inner_border_offset(&integral, ExploreDirection::Up, range);
+        let bottom = Self::find_inner_border_offset(&integral, ExploreDirection::Down, range);
+
+        // println!("Cell ({}, {}) size ({}x{}): {left:?}, {top:?}, {right:?}, {bottom:?}", cell.x, cell.y, cell.width, cell.height);
+        if [left, right, top, bottom].iter().any(Option::is_none) {
+            return None;
+        }
+        let (left, right, top, bottom) = (left.unwrap(), right.unwrap(), top.unwrap(), bottom.unwrap());
+
+        let width = right - left + 1;
+        let height = bottom - top + 1;
+        if width.abs_diff(height) > 2 {
+            return None;
+        }
+        Some(CellDim { x: left, y: top, width, height })
+    }    
+
     // Find the square within the given coordinates (they are relatively close to expected new cell).
     pub fn align_cell(&self, cell: &UnalignedCellDim) -> Option<CellDim> {
         let max_rest_width = (self.source.width() - cell.x).min(cell.width);
@@ -926,9 +1011,9 @@ impl NimageProcessor {
         // grey.save_with_format(new_file, image::ImageFormat::Png).ok();
 
         // test save
-        // let mid = imageproc::contrast::otsu_level(&grey);
-        // let mut bin_img = imageproc::contrast::threshold(&grey, mid,
-        //     if !self.dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
+        let mid = imageproc::contrast::otsu_level(&grey);
+        let mut bin_img = imageproc::contrast::threshold(&grey, mid,
+            if !self.dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
         
         // bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
         // // Make corners less smooth, more cornery.
@@ -938,20 +1023,25 @@ impl NimageProcessor {
         // imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
         // bin_img = imageops::resize(&bin_img, bin_img.width() / 2, bin_img.height() / 2, imageops::FilterType::Nearest);
 
-        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}b.png", cell.0, cell.1));
+        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}b.png", cell.x, cell.y));
         // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
 
-        let mut result = Self::find_seed_square(&grey, self.dark_mode)
+        // let mut result = Self::find_seed_square(&grey, self.dark_mode)
+        //     .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
+        let mut result = self.align_borders(&cell, &bin_img)
             .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
 
         if result.is_none() {
-            let ada_img = imageproc::contrast::adaptive_threshold(&grey, 1);
-            result = Self::find_seed_square(&ada_img, self.dark_mode)
+            let mut ada_img = imageproc::contrast::adaptive_threshold(&grey, 2);
+            if self.dark_mode {
+                imageops::invert(&mut ada_img);
+            }
+            result = self.align_borders(&cell, &ada_img)
                 .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
 
             // if result.is_none() {            
             //     let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.x, cell.y));
-            //     ada_img.save_with_format(new_file, image::ImageFormat::Png).ok();
+            //     grey.save_with_format(new_file, image::ImageFormat::Png).ok();
             // }
 
         }
@@ -1217,7 +1307,7 @@ mod tests {
 
         for entry in std::fs::read_dir("./data/mazes").unwrap() {
             let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
-            // if img_name != "4-eri.png" {continue};
+            // if img_name != "with-drift.jpg" { continue };
             let img = ImageReader::open(entry.as_ref().unwrap().path()).unwrap().decode().unwrap();
             let proc = NimageProcessor::new(&img_name, img);
 
@@ -1238,8 +1328,13 @@ mod tests {
                     let maybe_next_cell = cur.cell.offset(dir, (cur.cell.width / 4, cur.cell.height / 4), clip_rect);
                     if let Some(next_cell) = maybe_next_cell {
                         if let Some(aligned_cell) = proc.align_cell(&next_cell) {
-                            // println!("  Enq: {}", aligned_cell);
-                            expl.enqueue(ExploreCell { position: next_pos, cell: aligned_cell });
+                            if aligned_cell.width.abs_diff(cur.cell.width) > 2 ||
+                            aligned_cell.height.abs_diff(cur.cell.height) > 2 {
+                                println!("  Not good: {}", aligned_cell);
+                            } else {
+                                // println!("  Enq: {}", aligned_cell);
+                                expl.enqueue(ExploreCell { position: next_pos, cell: aligned_cell });
+                            }
                         }
                     }
                 }
