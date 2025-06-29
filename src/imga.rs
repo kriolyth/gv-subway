@@ -2,6 +2,8 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Write};
 
 use bitvec::prelude::BitArray;
+use image::buffer::ConvertBuffer;
+use image::imageops::invert;
 use image::{imageops, GrayImage, Luma, GenericImageView};
 use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
@@ -21,6 +23,8 @@ use crate::field::{Cell, Coordinate, Subway};
 /// Similarity threshold depends on the length of vectors and the number
 /// of entries in "known features" database
 const DETECT_THRESHOLD: i32 = 30;
+
+const NN_INPUT_SIZE: u32 = 20;
 
 #[wasm_bindgen]
 pub struct ImageProcessor {
@@ -1048,6 +1052,98 @@ impl NimageProcessor {
 
         result
     }
+
+    pub fn extract_cell_image(&self, cell: &CellDim) -> image::GrayImage {
+        let mut img = imageops::grayscale(&self.source.view(cell.x+1, cell.y+1, cell.width-2, cell.height-2).to_image());
+        if self.dark_mode {
+            imageops::invert(&mut img);
+        }
+        img
+    }
+
+    pub fn conform_image(img: &image::GrayImage) -> image::GrayImage {
+        let mut result = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
+
+        fn contrast(p: u8, min: u8, max: u8) -> u8 {
+            if min == max { return u8::MAX };
+            let step: f32 = (1.0 / (max - min) as f32);
+            let mut k: f32 = (p - min) as f32 * step;
+
+            // overcontrast a little
+            k = (k - 0.5) * 1.2 + 0.5;
+
+            (k * 255.0).round().clamp(u8::MIN as f32, u8::MAX as f32) as u8
+        }
+
+        let mm = imageproc::stats::min_max(&img)[0];
+        let img = imageproc::map::map_pixels(img, |_x, _y, p| {
+            Luma::<u8>::from( [contrast(p.0[0], mm.min, mm.max)] )
+        });
+
+        // fill background with brighter colour
+        let bgcolour = imageproc::stats::percentile(&img, 95);
+        result.fill(bgcolour);
+
+        let centroid = center_mass(&img);
+
+        let x = (result.width() as i64) / 2 - centroid.0 as i64;
+        let y = (result.height() as i64) / 2 - centroid.1 as i64;
+        imageops::overlay(&mut result, &img, x, y);
+
+        result
+    }
+
+    /// Returns true if the image is mostly white (blank)
+    pub fn is_blank_image(img: &image::GrayImage) -> bool {
+        imageproc::stats::percentile(&img, 2) > 192
+    }
+}
+
+pub struct NTiler {
+    pub network: Network,
+}
+
+impl NTiler {
+    fn make_network_model() -> Network {
+        let in_size: usize = (NN_INPUT_SIZE * NN_INPUT_SIZE).try_into().unwrap();
+        let hidden_out_size = in_size / 4;
+        let out_size = 16;
+
+        let network_model = NetworkModelBuilder::new()
+            .full_dense(hidden_out_size)
+                .init_uniform_signed()
+                .adam()
+                .tanh()
+            .end()
+            .full_dense(out_size)
+                .init_uniform()
+                .adam()
+                .softmax()
+            .end()
+        .build();
+        network_model.to_network(in_size as usize)
+    }
+
+    pub fn new() -> Self {
+        Self {
+            network: Self::make_network_model()
+        }
+    }
+
+    pub fn predict(&mut self, data: Vec<u8>) -> Option<usize> {
+        // let mm = data.iter().fold((u8::MAX, u8::MIN), |acc, &p| { (acc.0.min(p), acc.1.max(p)) } );
+        // let nn_data: Vec<f32> = data.iter().map(|p| ((p - mm.0) as f32 / (mm.1 - mm.0 + 1) as f32) / 255. - 0.5).collect();
+        let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
+
+        let result = self.network.predict(&nn_data);
+        let max = result.iter().enumerate().max_by(|&a, &b| { if a.1 < b.1 { Ordering::Less } else if a.1 == b.1 { Ordering::Equal } else { Ordering::Greater } }).unwrap();
+        // println!("  Predict as {}: {:?}", max.0, result);
+        if *max.1 > 0.5 {
+            Some(max.0 as usize)
+        } else {
+            None
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -1118,6 +1214,10 @@ impl Explorer {
 
     pub fn advance(&mut self) {
         self.cursor += 1;
+    }
+
+    pub fn reset(&mut self) {
+        self.cursor = 0;
     }
 
     pub fn visited(&self, position: &CellMazePos) -> bool {
@@ -1302,10 +1402,11 @@ mod tests {
     }
 
     #[test]
+    #[ignore]
     fn split_img() {
         use image::ImageReader;
 
-        for entry in std::fs::read_dir("./data/mazes").unwrap() {
+        for (num, entry) in std::fs::read_dir("./data/mazes").unwrap().enumerate() {
             let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
             // if img_name != "with-drift.jpg" { continue };
             let img = ImageReader::open(entry.as_ref().unwrap().path()).unwrap().decode().unwrap();
@@ -1318,6 +1419,11 @@ mod tests {
                 continue;
             }
 
+            let proc = if proc.seed_square.unwrap().width > 48 {
+                let resized_img = proc.source.resize_exact(proc.source.width() / 2, proc.source.height() / 2, imageops::Triangle);
+                NimageProcessor::new(&img_name, resized_img)
+            } else { proc };
+
             let clip_rect = (0u32, 0u32, proc.source.width(), proc.source.height());
             let mut expl = Explorer::new(proc.seed_square.unwrap());
             while let Some(cur) = expl.current() {
@@ -1328,8 +1434,7 @@ mod tests {
                     let maybe_next_cell = cur.cell.offset(dir, (cur.cell.width / 4, cur.cell.height / 4), clip_rect);
                     if let Some(next_cell) = maybe_next_cell {
                         if let Some(aligned_cell) = proc.align_cell(&next_cell) {
-                            if aligned_cell.width.abs_diff(cur.cell.width) > 2 ||
-                            aligned_cell.height.abs_diff(cur.cell.height) > 2 {
+                            if aligned_cell.width.abs_diff(cur.cell.width) > 2 || aligned_cell.height.abs_diff(cur.cell.height) > 2 {
                                 println!("  Not good: {}", aligned_cell);
                             } else {
                                 // println!("  Enq: {}", aligned_cell);
@@ -1344,6 +1449,141 @@ mod tests {
 
             println!("{img_name}: Found {} cells", expl.cursor);
             expl.print_layout();
+
+            // save the tiles
+            expl.reset();
+            let mut cache = Vec::<image::GrayImage>::new();
+            while let Some(cur) = expl.current() {
+                let sub = proc.extract_cell_image(&cur.cell);
+                if !NimageProcessor::is_blank_image(&sub) {
+                    let sub = NimageProcessor::conform_image(&sub);
+                    if NimageProcessor::is_blank_image(&sub) {
+                        println!("WARNING: blank image after conform, cell {}", cur.cell);
+                        let new_file = std::path::Path::new("./data/proc").join(format!("fail-{}-{}.png", num, expl.cursor));
+                        sub.save_with_format(new_file, image::ImageFormat::Png).ok();
+                    }
+                    if cache.iter().any(|entry| entry.width() == sub.width() && entry.height() == sub.height() && entry.pixels().zip(sub.pixels()).all(|(p1, p2)| p1 == p2)) {
+                        println!(" In cache: {}", cur.cell);
+                    } else {
+                        let new_file = std::path::Path::new("./data/proc").join(format!("{}-{}.png", num, expl.cursor));
+                        sub.save_with_format(new_file, image::ImageFormat::Png).ok();
+                        cache.push(sub);
+                    }
+                }
+                expl.advance();
+            }
+
+        }
+    }
+
+    #[test]
+    // #[ignore]
+    fn train_nn() {
+        use jiro_nn::loss::Losses;
+
+        const BASE: &str = "./data/proc/five";
+        // const TEST: &str = "./data/proc/four";
+        let mut train_in: Vec<Vec<f32>> = vec![];
+        let mut train_out: Vec<Vec<f32>> = vec![];
+        for class_dir in std::fs::read_dir(BASE).unwrap() {
+            if class_dir.is_err() { continue };
+            if !class_dir.as_ref().unwrap().metadata().unwrap().is_dir() { continue };
+            let class: usize = match usize::from_str(&class_dir.as_ref().unwrap().file_name().to_string_lossy()) {
+                Ok(some) => some,
+                Err(_) => continue
+            };
+            let mut classifier_vec: Vec<f32> = [0f32; 16].into();
+            classifier_vec[class] = 1.0;
+
+            for train_img in std::fs::read_dir(class_dir.as_ref().unwrap().path()).unwrap() {
+                let mut data_vec = Vec::<f32>::new();
+                data_vec.reserve((NN_INPUT_SIZE * NN_INPUT_SIZE) as usize);
+                let img = image::ImageReader::open(train_img.unwrap().path()).unwrap().decode().unwrap();
+                let img = imageops::grayscale(&img);
+
+                for p in img.pixels().map(|p| p.0[0]) {
+                    data_vec.push(p as f32 / 255.0 - 0.5);
+                }
+
+                for jitter_x in -2..=2i32 {
+                    for jitter_y in -2..=2i32 {
+                        let mut dv = data_vec.clone();
+                        let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
+                        if shift < 0 {
+                            dv.rotate_left(-shift as usize);
+                        } else {
+                            dv.rotate_right(shift as usize);
+                        }
+
+                        train_in.push(dv);
+                        train_out.push(classifier_vec.clone());
+                    }
+                }                
+            }
+        }
+
+        println!("Prepared {} training samples", train_in.len());
+
+        let mut tiler = NTiler::new();
+
+        let loss = Losses::BCE.to_loss();
+        let batch_size = 2048;
+
+        for epoch in 0..4000 {
+            let error = tiler.network.train(
+                epoch,
+                &train_in,
+                &train_out,
+                &loss,
+                batch_size,
+            );
+
+            if epoch % 25 == 0 {
+                println!("Epoch: {} Average training loss: {}", epoch, error);
+            }
+        }
+
+        tiler.network.get_params().to_binary_compressed("./gv_subway_nn.bin");
+    }
+
+    #[test]
+    #[ignore]
+    fn evaluate_nn() {
+        const TEST: &str = "./data/proc/test-five";
+
+        let mut tiler = NTiler::new();
+        tiler.network.load_params(&NetworkParams::from_binary_compressed("./gv_subway_nn.bin"));
+
+        // evaluate
+        for class_dir in std::fs::read_dir(TEST).unwrap() {
+            if class_dir.is_err() { continue };
+            if !class_dir.as_ref().unwrap().metadata().unwrap().is_dir() { continue };
+            let class: usize = match usize::from_str(&class_dir.as_ref().unwrap().file_name().to_string_lossy()) {
+                Ok(some) => some,
+                Err(_) => continue
+            };
+
+            for test_img in std::fs::read_dir(class_dir.as_ref().unwrap().path()).unwrap() {
+                let img = image::ImageReader::open(test_img.as_ref().unwrap().path()).unwrap().decode().unwrap();
+                let img = imageops::grayscale(&img);
+
+                let img_v = img.into_vec();
+                for jitter_x in -1..=1i32 {
+                    for jitter_y in -1..=1i32 {
+                        let mut v = img_v.clone();
+                        let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
+                        if shift < 0 {
+                            v.rotate_left(-shift as usize);
+                        } else {
+                            v.rotate_right(shift as usize);
+                        }
+                        let pred = tiler.predict(v);
+                        if Some(class) != pred {
+                            println!("Mismatch: {} as {:?} (jitter {jitter_x}, {jitter_y})", test_img.as_ref().unwrap().path().to_string_lossy(), pred);
+                        }
+                    }
+                }
+            }
         }
     }
 }
