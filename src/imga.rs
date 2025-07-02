@@ -4,7 +4,7 @@ use std::fmt::{Debug, Display, Write};
 use bitvec::prelude::BitArray;
 use image::buffer::ConvertBuffer;
 use image::imageops::invert;
-use image::{imageops, GrayImage, Luma, GenericImageView};
+use image::{imageops, DynamicImage, GenericImage, GenericImageView, GrayImage, Luma};
 use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
 use nalgebra::DMatrixView;
@@ -24,7 +24,7 @@ use crate::field::{Cell, Coordinate, Subway};
 /// of entries in "known features" database
 const DETECT_THRESHOLD: i32 = 30;
 
-const NN_INPUT_SIZE: u32 = 20;
+const NN_INPUT_SIZE: u32 = 12;
 
 #[wasm_bindgen]
 pub struct ImageProcessor {
@@ -808,7 +808,6 @@ impl CellDim {
 struct NimageProcessor {
     pub name: String,
     pub source: image::DynamicImage,
-    pub otsu_level: u8,
     pub dark_mode: bool,
     pub seed_square: Option<CellDim>,
 }
@@ -906,14 +905,13 @@ impl NimageProcessor {
 
     pub fn new(name: &str, source: image::DynamicImage) -> Self {
         let (grey, x, y) = Self::get_seed_subimage(&source);
-        let otsu = imageproc::contrast::otsu_level(&grey);
         let dark_mode = Self::detect_dark_mode(&grey);
         let mut seed_square = Self::find_seed_square(&grey, dark_mode);
         if let Some(CellDim { x: a, y: b, .. }) = &mut seed_square {
             *a += x;
             *b += y;
         }
-        Self { name: name.to_owned(), source, otsu_level: otsu, dark_mode, seed_square }
+        Self { name: name.to_owned(), source, dark_mode, seed_square }
     }
 
     fn find_best_lbp(bin_img: &image::GrayImage, pattern: u8, area: (core::ops::Range<u32>, core::ops::Range<u32>), default: (u32, u32)) -> (u32, u32) {
@@ -950,6 +948,43 @@ impl NimageProcessor {
             }
         }
         dip_offset
+    }
+
+    fn scan_blank(img: &image::GrayImage, from_pt: (i32, i32), direction: ExploreDirection) -> (i32, i32) {
+        const WIDTH: i32 = 10;
+        let mut pt = (from_pt.0 as i32, from_pt.1 as i32);        
+        let dir = match direction {
+            ExploreDirection::Left => (-1, 0),
+            ExploreDirection::Right  => (1, 0),
+            ExploreDirection::Up => (0, -1),
+            ExploreDirection::Down => (0, 1),
+        };
+        for _steps in 0..10 { // safe limit
+            (pt.0, pt.1) = (pt.0 + dir.0, pt.1 + dir.1);
+            if pt.0 == 0 || pt.0 == img.width() as i32 - 1 || pt.1 == 0 || pt.1 == img.height() as i32 - 1 {
+                break;
+            }
+
+            // scan line
+            let mut blank: bool = true;
+            for i in -WIDTH/2..WIDTH/2 {     
+                match direction  {
+                    ExploreDirection::Left | ExploreDirection::Right => {
+                        if let Some(p) = img.get_pixel_checked(pt.0 as u32 , (pt.1 + i) as u32) {
+                            if p.0[0] < 192 { blank = false; break; }
+                        }
+                    }
+                    ExploreDirection::Up | ExploreDirection::Down => {
+                        if let Some(p) = img.get_pixel_checked((pt.0 + i) as u32 , pt.1 as u32) {
+                            if p.0[0] < 192 { blank = false; break; }
+                        }
+                    }
+                }
+            }
+
+            if blank {break}
+        }
+        pt
     }
 
     fn align_corners(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
@@ -1010,28 +1045,10 @@ impl NimageProcessor {
         let subview = self.source.view(cell.x, cell.y, max_rest_width, max_rest_height).to_image();
         let grey = image::imageops::grayscale(&subview);
 
-        
-        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.0, cell.1));
-        // grey.save_with_format(new_file, image::ImageFormat::Png).ok();
-
-        // test save
         let mid = imageproc::contrast::otsu_level(&grey);
-        let mut bin_img = imageproc::contrast::threshold(&grey, mid,
+        let bin_img = imageproc::contrast::threshold(&grey, mid,
             if !self.dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
         
-        // bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
-        // // Make corners less smooth, more cornery.
-        // // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
-        // // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
-        // imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
-        // imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
-        // bin_img = imageops::resize(&bin_img, bin_img.width() / 2, bin_img.height() / 2, imageops::FilterType::Nearest);
-
-        // let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}b.png", cell.x, cell.y));
-        // bin_img.save_with_format(new_file, image::ImageFormat::Png).ok();
-
-        // let mut result = Self::find_seed_square(&grey, self.dark_mode)
-        //     .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
         let mut result = self.align_borders(&cell, &bin_img)
             .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
 
@@ -1042,12 +1059,6 @@ impl NimageProcessor {
             }
             result = self.align_borders(&cell, &ada_img)
                 .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
-
-            // if result.is_none() {            
-            //     let new_file = std::path::Path::new("./data/ce").join(format!("c-{}-{}.png", cell.x, cell.y));
-            //     grey.save_with_format(new_file, image::ImageFormat::Png).ok();
-            // }
-
         }
 
         result
@@ -1086,9 +1097,22 @@ impl NimageProcessor {
 
         let centroid = center_mass(&img);
 
-        let x = (result.width() as i64) / 2 - centroid.0 as i64;
-        let y = (result.height() as i64) / 2 - centroid.1 as i64;
-        imageops::overlay(&mut result, &img, x, y);
+        // Variant with just overlay:
+        // let x = (result.width() as i64) / 2 - centroid.0 as i64;
+        // let y = (result.height() as i64) / 2 - centroid.1 as i64;
+        // imageops::overlay(&mut result, &img, x, y);
+
+        // Variant with resize:
+        let left = Self::scan_blank(&img, centroid, ExploreDirection::Left).0 + 1;
+        let right = Self::scan_blank(&img, centroid, ExploreDirection::Right).0;
+        let top = Self::scan_blank(&img, centroid, ExploreDirection::Up).1 + 1;
+        let bottom = Self::scan_blank(&img, centroid, ExploreDirection::Down).1;
+        println!("Scan blank: ({left}, {top}) - ({right}, {bottom})");
+
+        let focus_img = DynamicImage::resize(&DynamicImage::ImageLuma8(img.view(left as u32, top as u32, (right - left) as u32, (bottom - top) as u32).to_image()),
+            NN_INPUT_SIZE, NN_INPUT_SIZE, imageops::FilterType::CatmullRom);
+        let focus_img = imageops::grayscale(&focus_img);
+        imageops::overlay(&mut result, &focus_img, 0, 0);
 
         result
     }
@@ -1131,8 +1155,6 @@ impl NTiler {
     }
 
     pub fn predict(&mut self, data: Vec<u8>) -> Option<usize> {
-        // let mm = data.iter().fold((u8::MAX, u8::MIN), |acc, &p| { (acc.0.min(p), acc.1.max(p)) } );
-        // let nn_data: Vec<f32> = data.iter().map(|p| ((p - mm.0) as f32 / (mm.1 - mm.0 + 1) as f32) / 255. - 0.5).collect();
         let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
 
         let result = self.network.predict(&nn_data);
@@ -1143,6 +1165,12 @@ impl NTiler {
         } else {
             None
         }
+    }
+
+    pub fn load(&mut self) {
+        let weights = include_bytes!("../nn.bin");        
+        let params = NetworkParams(bincode::borrow_decode_from_slice(weights, bincode::config::standard()).unwrap().0);
+        self.network.load_params(&params);
     }
 }
 
@@ -1477,12 +1505,11 @@ mod tests {
     }
 
     #[test]
-    // #[ignore]
+    #[ignore]
     fn train_nn() {
         use jiro_nn::loss::Losses;
 
-        const BASE: &str = "./data/proc/five";
-        // const TEST: &str = "./data/proc/four";
+        const BASE: &str = "./data/proc/six";
         let mut train_in: Vec<Vec<f32>> = vec![];
         let mut train_out: Vec<Vec<f32>> = vec![];
         for class_dir in std::fs::read_dir(BASE).unwrap() {
@@ -1505,8 +1532,8 @@ mod tests {
                     data_vec.push(p as f32 / 255.0 - 0.5);
                 }
 
-                for jitter_x in -2..=2i32 {
-                    for jitter_y in -2..=2i32 {
+                for jitter_x in -1..=1i32 {
+                    for jitter_y in -0..=0i32 {
                         let mut dv = data_vec.clone();
                         let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
                         if shift < 0 {
@@ -1544,12 +1571,15 @@ mod tests {
         }
 
         tiler.network.get_params().to_binary_compressed("./gv_subway_nn.bin");
+
+        let mut file = std::fs::File::create("./nn.bin").unwrap();
+        bincode::encode_into_std_write(tiler.network.get_params().0, &mut file, bincode::config::standard()).unwrap();
     }
 
     #[test]
     #[ignore]
     fn evaluate_nn() {
-        const TEST: &str = "./data/proc/test-five";
+        const TEST: &str = "./data/proc/test-six";
 
         let mut tiler = NTiler::new();
         tiler.network.load_params(&NetworkParams::from_binary_compressed("./gv_subway_nn.bin"));
@@ -1569,7 +1599,7 @@ mod tests {
 
                 let img_v = img.into_vec();
                 for jitter_x in -1..=1i32 {
-                    for jitter_y in -1..=1i32 {
+                    for jitter_y in -0..=0i32 {
                         let mut v = img_v.clone();
                         let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
                         if shift < 0 {
