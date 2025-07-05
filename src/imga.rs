@@ -31,6 +31,7 @@ pub enum Mark {
     Direction = 11,
     Scarecrow = 12,
     Fountain = 13,
+    Reverse = 14,
 }
 
 impl TryFrom<usize> for Mark {
@@ -51,6 +52,7 @@ impl TryFrom<usize> for Mark {
             11 => Ok(Mark::Direction),
             12 => Ok(Mark::Scarecrow),
             13 => Ok(Mark::Fountain),
+            14 => Ok(Mark::Reverse),
             _ => Err(()),
         }
     }
@@ -830,6 +832,7 @@ mod tests {
     #[ignore]
     fn split_img() {
         use image::ImageReader;
+        const SAVE_ONLY_UNRECOGNIZED: bool = false;
 
         for (num, entry) in std::fs::read_dir("./data/mazes").unwrap().enumerate() {
             let img_name = entry.as_ref().unwrap().file_name().to_string_lossy().into_owned();
@@ -890,8 +893,15 @@ mod tests {
                     if cache.iter().any(|entry| entry.width() == sub.width() && entry.height() == sub.height() && entry.pixels().zip(sub.pixels()).all(|(p1, p2)| p1 == p2)) {
                         println!(" In cache: {}", cur.cell);
                     } else {
-                        let new_file = std::path::Path::new("./data/proc").join(format!("{}-{}.png", num, expl.cursor));
-                        sub.save_with_format(new_file, image::ImageFormat::Png).ok();
+                        let save: bool = !SAVE_ONLY_UNRECOGNIZED || {
+                            let mut tiler = NTiler::new();
+                            tiler.load();
+                            tiler.predict(&sub.clone().into_vec()).is_none()
+                        };
+                        if save {
+                            let new_file = std::path::Path::new("./data/proc").join(format!("{}-{}.png", num, expl.cursor));
+                            sub.save_with_format(new_file, image::ImageFormat::Png).ok();
+                        }
                         cache.push(sub);
                     }
                 }

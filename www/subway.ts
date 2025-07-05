@@ -15,7 +15,8 @@ export const MarkSymbols = new Map<Mark, string>([
     [Mark.Luck, '🍀'],
     [Mark.RaiseWall, '□'],
     [Mark.Direction, '╬'],
-    [Mark.Scarecrow, '👻']
+    [Mark.Scarecrow, '👻'],
+    [Mark.Reverse, '↪']
 ])
 
 export const stField = reactive({
