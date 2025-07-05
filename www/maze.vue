@@ -36,7 +36,6 @@ function reemitTouchCell(id: number) {
 }
 
 function isBorderCell(rowIndex: number, colIndex: number) {
-    console.log(rowIndex, colIndex);
     return (rowIndex == 0 || colIndex == 0 || rowIndex == (rowWidth - 1) || colIndex == (mazeCells.length / rowWidth - 1));
 }
 </script>
