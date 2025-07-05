@@ -12,7 +12,7 @@ module.exports = {
         path: path.resolve(__dirname, "dist"),
         filename: "bootstrap.js", // filename referenced in index.html
     },
-    mode: 'development',
+    mode: 'production',
 
     resolve: {
         extensions: ['.ts', '.js', '.wasm', '.vue'],
