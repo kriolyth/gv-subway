@@ -36,6 +36,7 @@ function reemitTouchCell(id: number) {
 }
 
 function isBorderCell(rowIndex: number, colIndex: number) {
+    console.log(rowIndex, colIndex);
     return (rowIndex == 0 || colIndex == 0 || rowIndex == (rowWidth - 1) || colIndex == (mazeCells.length / rowWidth - 1));
 }
 </script>
@@ -48,7 +49,7 @@ function isBorderCell(rowIndex: number, colIndex: number) {
                 :mark="marks[index + rowIndex * rowWidth]" 
                 :outer="outer[index + rowIndex * rowWidth]"
                 :id="index + rowIndex * rowWidth"
-                :borderCell="isBorderCell(rowIndex, index)" @touchcell="reemitTouchCell"></mazecell>
+                :borderCell="isBorderCell(parseInt(rowIndex.toString()), parseInt(index.toString()))" @touchcell="reemitTouchCell"></mazecell>
         </div>
     </div>
 </template>
