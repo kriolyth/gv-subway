@@ -312,9 +312,11 @@ impl NimageProcessor {
         
         // Make corners less smooth, more cornery.
         bin_img = imageops::resize(&bin_img, bin_img.width() * 2, bin_img.height() * 2, imageops::FilterType::Nearest);
-        
+
         // Occasional single pixels from subpixel smoothing may linger in cell corners and throw off square cell detection.
         // If we erode and dilate whitespace with different norms, whitespace will fill in cell edges without disrupting the borders.
+        imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
+        imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
         imageproc::morphology::erode_mut(&mut bin_img, imageproc::distance_transform::Norm::L1, 1);
         imageproc::morphology::dilate_mut(&mut bin_img, imageproc::distance_transform::Norm::LInf, 1);
         bin_img = imageops::resize(&bin_img, bin_img.width() / 2, bin_img.height() / 2, imageops::FilterType::Nearest);
@@ -488,7 +490,6 @@ impl NimageProcessor {
         let right = Self::scan_blank(&img, centroid, ExploreDirection::Right).0;
         let top = Self::scan_blank(&img, centroid, ExploreDirection::Up).1 + 1;
         let bottom = Self::scan_blank(&img, centroid, ExploreDirection::Down).1;
-        println!("Scan blank: ({left}, {top}) - ({right}, {bottom})");
 
         let focus_img = DynamicImage::resize(&DynamicImage::ImageLuma8(img.view(left as u32, top as u32, (right - left) as u32, (bottom - top) as u32).to_image()),
             NN_INPUT_SIZE, NN_INPUT_SIZE, imageops::FilterType::CatmullRom);
@@ -500,7 +501,7 @@ impl NimageProcessor {
 
     /// Returns true if the image is mostly white (blank)
     pub fn is_blank_image(img: &image::GrayImage) -> bool {
-        imageproc::stats::percentile(&img, 2) > 192
+        imageproc::stats::percentile(&img, 2) > 192 && imageproc::stats::min_max(&img)[0].min > 160
     }
 }
 
@@ -881,6 +882,7 @@ mod tests {
             // save the tiles
             expl.reset();
             let mut cache = Vec::<image::GrayImage>::new();
+            let mut cache_hit: usize = 0;
             while let Some(cur) = expl.current() {
                 let sub = proc.extract_cell_image(&cur.cell);
                 if !NimageProcessor::is_blank_image(&sub) {
@@ -891,12 +893,14 @@ mod tests {
                         sub.save_with_format(new_file, image::ImageFormat::Png).ok();
                     }
                     if cache.iter().any(|entry| entry.width() == sub.width() && entry.height() == sub.height() && entry.pixels().zip(sub.pixels()).all(|(p1, p2)| p1 == p2)) {
-                        println!(" In cache: {}", cur.cell);
+                        cache_hit += 1;
                     } else {
                         let save: bool = !SAVE_ONLY_UNRECOGNIZED || {
                             let mut tiler = NTiler::new();
                             tiler.load();
-                            tiler.predict(&sub.clone().into_vec()).is_none()
+                            let p = tiler.predict(&sub.clone().into_vec());
+                            //println!("  Predict: {}-{} as {:?}", num, expl.cursor, p);
+                            p.is_none()
                         };
                         if save {
                             let new_file = std::path::Path::new("./data/proc").join(format!("{}-{}.png", num, expl.cursor));
@@ -904,10 +908,15 @@ mod tests {
                         }
                         cache.push(sub);
                     }
+                } else {
+                    // save blank cells to find misses
+                    // let sub = NimageProcessor::conform_image(&sub);
+                    // let new_file = std::path::Path::new("./data/proc").join(format!("{}-{}-nc.png", num, expl.cursor));
+                    // sub.save_with_format(new_file, image::ImageFormat::Png).ok();
                 }
                 expl.advance();
             }
-
+            println!(" Cache hit: {} / {}", cache_hit, expl.queue.len());
         }
     }
 
@@ -963,7 +972,7 @@ mod tests {
         let loss = Losses::BCE.to_loss();
         let batch_size = 2048;
 
-        for epoch in 0..4000 {
+        for epoch in 0..3000 {
             let error = network.train(
                 epoch,
                 &train_in,
