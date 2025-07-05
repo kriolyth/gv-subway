@@ -2,8 +2,6 @@ use std::cmp::Ordering;
 use std::fmt::{Debug, Display, Write};
 
 use bitvec::prelude::BitArray;
-use image::buffer::ConvertBuffer;
-use image::imageops::invert;
 use image::{imageops, DynamicImage, GenericImage, GenericImageView, GrayImage, Luma};
 use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
@@ -44,7 +42,7 @@ pub struct Grid {
 }
 
 #[wasm_bindgen]
-#[derive(Copy, Clone, Debug)]
+#[derive(Copy, Clone, PartialEq)]
 pub enum Mark {
     None = 0,
     Wall = 1,
@@ -62,25 +60,82 @@ pub enum Mark {
     Fountain = 13,
 }
 
+impl TryFrom<usize> for Mark {
+    type Error = ();
+    fn try_from(value: usize) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(Mark::None),
+            1 => Ok(Mark::Wall),
+            2 => Ok(Mark::Entrance),
+            3 => Ok(Mark::Treasury),
+            4 => Ok(Mark::Subtreasury),
+            5 => Ok(Mark::FinalBoss),
+            6 => Ok(Mark::OtherBoss),
+            7 => Ok(Mark::Ladder),
+            8 => Ok(Mark::Trap),
+            9 => Ok(Mark::Luck),
+            10 => Ok(Mark::RaiseWall),
+            11 => Ok(Mark::Direction),
+            12 => Ok(Mark::Scarecrow),
+            13 => Ok(Mark::Fountain),
+            _ => Err(()),
+        }
+    }
+}
+
+impl Display for Mark {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Mark::None => "⬜️",         // White large square
+            Mark::Wall => "⬛️",         // Black large square
+            Mark::Entrance => "🚪",     // Door
+            Mark::Treasury => "💰",     // Money bag
+            Mark::Subtreasury => "🪙",  // Coin
+            Mark::FinalBoss => "👹",    // Ogre
+            Mark::OtherBoss => "👾",    // Alien monster
+            Mark::Ladder => "🪜",       // Ladder
+            Mark::Trap => "⚠️",        // Warning
+            Mark::Luck => "🍀",         // Four leaf clover
+            Mark::RaiseWall => "🧱",    // Brick
+            Mark::Direction => "🧭",    // Compass
+            Mark::Scarecrow => "🪆",    // Nesting dolls (closest to scarecrow)
+            Mark::Fountain => "⛲️",    // Fountain
+        };
+        write!(f, "{s}")
+    }
+}
+
 /// Encapsulates detected maze for passing around
 #[wasm_bindgen]
 pub struct Maze {
-    grid: Grid,
+    // grid: Grid,
+    width: usize,
+    height: usize,
     cells: Vec<Cell>,
     marks: Vec<Mark>,
 }
 
 #[wasm_bindgen]
 impl Maze {
+    pub fn new() -> Self {
+        Self {
+            // grid: Grid::default(),
+            width: 0,
+            height: 0,
+            cells: vec![],
+            marks: vec![]
+        }
+    }
+
     /// Apply detected maze to the subway field
     pub fn apply_to_subway(&self, subway: &mut Subway) {
-        let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
-        let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
+        let subway_row_offset = (crate::field::SIZE_Y - self.height) / 2;
+        let subway_col_offset = (crate::field::SIZE_X - self.width) / 2;
 
         subway.reset();
-        for row in 0..self.grid.row_count {
-            for col in 0..self.grid.col_count {
-                let grid_idx = row * self.grid.col_count + col;
+        for row in 0..self.height {
+            for col in 0..self.width {
+                let grid_idx = row * self.width + col;
                 subway.set_field(
                     Subway::to_idx(row + subway_row_offset, col + subway_col_offset),
                     match self.marks[grid_idx] {
@@ -97,20 +152,20 @@ impl Maze {
     ///
     /// Location relative to larger Subway, which is offseted by maze size
     pub fn get_mark(&self, idx: usize) -> Mark {
-        let subway_row_offset = (crate::field::SIZE_Y - self.grid.row_count) / 2;
-        let subway_col_offset = (crate::field::SIZE_X - self.grid.col_count) / 2;
+        let subway_row_offset = (crate::field::SIZE_Y - self.height) / 2;
+        let subway_col_offset = (crate::field::SIZE_X - self.width) / 2;
 
         // requested coordinate can lie outside of the detected maze, so
         // return nothing
         let Coordinate { row, col } = Subway::from_idx(idx);
         if row < subway_row_offset
             || col < subway_col_offset
-            || row >= (self.grid.row_count + subway_row_offset)
-            || col >= (self.grid.col_count + subway_col_offset)
+            || row >= (self.height + subway_row_offset)
+            || col >= (self.width + subway_col_offset)
         {
             return Mark::None;
         }
-        let grid_idx = (row - subway_row_offset) * self.grid.col_count + (col - subway_col_offset);
+        let grid_idx = (row - subway_row_offset) * self.width + (col - subway_col_offset);
 
         if grid_idx < self.marks.len() {
             self.marks[grid_idx]
@@ -121,7 +176,7 @@ impl Maze {
 
     /// Tell if the structure has valid data
     pub fn is_valid(&self) -> bool {
-        self.grid.size > 0
+        self.width > 0 && self.height > 0
     }
 }
 
@@ -142,47 +197,6 @@ impl Default for Grid {
             row_offset: 0,
             col_count: 0,
             col_offset: 0,
-        }
-    }
-}
-
-struct GridPeriod {
-    period: usize,
-    offset: usize,
-    count: usize,
-}
-
-impl GridPeriod {
-    /// Expand period count to the maximum possible
-    pub fn expand(&mut self, col: &DVector<u32>) {
-        const GRID_SENSITIVITY: u32 = 15;
-        let max_count = (col.nrows() - self.offset - 1) / (self.period + 1) + 1;
-
-        let grid_avg = col
-            .rows_with_step(self.offset, self.count, self.period)
-            .sum()
-            / (self.count as u32);
-
-        if self.count < max_count {
-            // expand up to max_count
-            self.count = col
-                .rows_with_step(self.offset, max_count, self.period)
-                .iter()
-                .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) < GRID_SENSITIVITY)
-                .count();
-        }
-
-        if self.count == 0 {
-            return;
-        }
-        // verify that between grid cells difference is higher
-        let mid_count = col
-            .rows_with_step(self.offset + self.period / 2, self.count - 1, self.period)
-            .iter()
-            .take_while(|&&value| value.max(grid_avg) - value.min(grid_avg) > GRID_SENSITIVITY)
-            .count();
-        if mid_count < self.count - 1 {
-            self.count = mid_count + 1
         }
     }
 }
@@ -348,295 +362,11 @@ impl ImageProcessor {
         rgba_image.data.into()
     }
 
-    /// Find periodic lines
-    ///
-    /// This function searches for periodic lines in vertical direction
-    /// in the given `image_slice`. An optional grid_period can be used
-    /// to refine search (e.g. for another direction)
-    fn find_grid_period(
-        image_slice: &DMatrix<u32>,
-        grid_period: Option<&GridPeriod>,
-    ) -> Option<GridPeriod> {
-        // initial number of lines to search for
-        const INITIAL_SEEK_SIZE: usize = 12;
-
-        // Sum up all columns - resulting column vector will have dips/spikes
-        // in place of grid lines.
-        // General consideration: values in original image are pure sums of RGB components,
-        // scaling by 3 is performed here for clarity, but is not necessary
-        let cols = image_slice
-            .column_sum()
-            .map(|value| value / (3 * image_slice.ncols() as u32));
-        let avg = cols.sum() / image_slice.nrows() as u32;
-        let dark_mode = avg < 128;
-
-        // set search period range, depending on whether we have someting already
-        let period_range = match grid_period {
-            None => 12..60,                                // whole range of possible periods
-            Some(found) => found.period..found.period + 1, // just one
-        };
-
-        // end result: detected grid with largest number of lines
-        let mut largest_grid: Option<GridPeriod> = None;
-
-        // Each period may start at a different offset - so we go over offsets too
-        // We first pick offsets that are on the other side of average
-        for (offset, _) in cols
-            .iter()
-            .enumerate()
-            .take(cols.len().saturating_sub(INITIAL_SEEK_SIZE * (period_range.start + 1)))
-            .filter(|(_index, value)| (**value < avg) ^ dark_mode)
-        {
-            // Iterate over acceptable periods - actual period depend on
-            // screen resolution and scaling. Also note that "period" used for
-            // traversing the matrix is the size of the "gap",
-            // therefore occasional +1's are needed
-            for period in period_range.start..period_range.end {
-                // There should be at least 12 rows. We can search for less, but searching
-                // for more cuts off earlier.
-                if (cols.len() - offset + period - 1) / (period + 1) < INITIAL_SEEK_SIZE {
-                    // period is too large - the maze won't fit, can work with what we have
-                    break;
-                }
-                // make sure all rows within period are darker/brighter
-                if cols
-                    .fixed_rows_with_step::<INITIAL_SEEK_SIZE>(offset, period)
-                    .iter()
-                    .all(|&value| (value < avg) ^ dark_mode)
-                {
-                    // all hit - add the result
-                    let mut grid = GridPeriod {
-                        period,
-                        offset,
-                        count: INITIAL_SEEK_SIZE,
-                    };
-                    // minimum found - now adjust the grid to capture all of the lines
-                    grid.expand(&cols);
-
-                    // After expansion grid may be unusable if rows are not alike,
-                    // so we need another check
-                    if grid.count > 0
-                        && (largest_grid.is_none()
-                            || largest_grid.as_ref().unwrap().count < grid.count)
-                    {
-                        largest_grid.replace(grid);
-                    }
-                }
-            }
-        }
-
-        largest_grid
-    }
-
-    /// Detect grid on a given image slice
-    fn find_grid(image_slice: &DMatrix<u32>) -> Option<Grid> {
-        // Grid will show up as regular changes of intensity on columns and rows.
-        // First we search for repeated rows
-        let row_grid = ImageProcessor::find_grid_period(image_slice, None);
-
-        if row_grid.is_none() {
-            #[cfg(target_arch="wasm32")]
-            web_sys::console::log_1(&"Horizontal lines not found".into());
-            println!("Horizontal lines not found. Matrix {} x {}", image_slice.ncols(), image_slice.nrows());
-            // let cols = image_slice
-            //     .column_sum()
-            //     .map(|value| value / (3 * image_slice.ncols() as u32));
-            // println!("{:?}", cols);
-            let slc = image_slice.view((2, 2), (18,18));
-            println!("{:?}", slc.iter().map(|v| v/3).collect::<Vec<_>>());
-            return None;
-        }
-
-        let row_grid = row_grid.unwrap();
-
-        // Now we can adjust for columns - only scan interesting part
-        // (also note that area is slightly clipped to make grid lines stand out)
-        let scan_part = image_slice
-            .rows(row_grid.offset + 1, row_grid.count * row_grid.period - 1)
-            .transpose();
-        let col_grid = ImageProcessor::find_grid_period(&scan_part, Some(&row_grid));
-        if col_grid.is_none() {
-            #[cfg(target_arch="wasm32")]
-            web_sys::console::log_1(&"Vertical lines not found".into());
-            return None;
-        }
-        let col_grid = col_grid.unwrap();
-
-        Some(Grid {
-            col_count: col_grid.count - 1,
-            col_offset: col_grid.offset,
-            row_count: row_grid.count - 1,
-            row_offset: row_grid.offset,
-            size: row_grid.period + 1,
-        })
-    }
-
     /// Compare similarity between two cells of same size
     fn compare(cell_a: &DMatrixView<u32>, cell_b: &DMatrixView<u32>) -> u32 {
         cell_a.zip_fold(cell_b, 0u32, |acc, a_value, b_value| {
             acc + a_value.max(b_value) - a_value.min(b_value)
         })
-    }
-
-    /// Find a grid structure in given screenshot
-    pub fn detect_grid(&self) -> Grid {
-        // First we try to detect the grid on the screenshot
-        let grid = ImageProcessor::find_grid(&self.pixels);
-        if grid.is_none() {
-            return Grid::default();
-        }
-        let grid = grid.unwrap();
-
-        // sanity check
-        if grid.col_count >= 20 || grid.row_count >= 20 || grid.col_count < 5 || grid.row_count < 5
-        {
-            return Grid::default();
-        }
-        grid
-    }
-
-    /// Detect the actual cells of the maze
-    pub fn detect_maze(&self, grid: &Grid) -> Maze {
-        let mut cells = Vec::with_capacity(grid.col_count * grid.row_count);
-        let mut marks = Vec::with_capacity(grid.col_count * grid.row_count);
-        if grid.size == 0 {
-            return Maze {
-                grid: *grid,
-                cells,
-                marks,
-            };
-        }
-
-        // On larger cell sizes grids have thicker borders,
-        // but we can approximately pick how much to inset into the cell square
-        let inset = 1 + grid.size / 15;
-        let cell_size = grid.size - inset * 2;
-
-        // Grab top left cell - this will be a wall
-        let wall_cell = self.pixels.view(
-            (grid.row_offset + inset, grid.col_offset + inset),
-            (cell_size, cell_size),
-        );
-
-        // candidates: cell id, similarity distance 
-        let mut entry_candidate: (usize, i32) = (0, 1000);
-        let mut treasury_candidate: (usize, i32) = (0, 1000);
-
-        // go over similar slices and check how well they compare with the wall
-        for row in 0..grid.row_count {
-            for col in 0..grid.col_count {
-                let cell = self.pixels.view(
-                    (
-                        grid.row_offset + row * grid.size + inset,
-                        grid.col_offset + col * grid.size + inset,
-                    ),
-                    (cell_size, cell_size),
-                );
-                let diff = ImageProcessor::compare(&wall_cell, &cell);
-                if diff < (15 * grid.size as u32 * grid.size as u32) {
-                    // wall
-                    cells.push(Cell::Wall);
-                    // TODO: detect "raised wall" mark
-                    marks.push(Mark::None);
-                } else {
-                    cells.push(Cell::Pass);
-                    marks.push(Mark::None);
-
-                    // we'll try to detect special cells by their very special
-                    // characteristics
-                    let cell_avg = cell.sum() / (cell.ncols() as u32 * cell.nrows() as u32);
-                    let cell_max = cell.max();
-                    let cell_min = cell.min();
-                    if cell_max > cell_min + 100 {
-                        // Special cells have icons, so their min/max has quite some difference.
-                        // Of these special cells two are most interesting: entry and treasury.
-
-                        let dark_mode = cell_avg < 128 * 3;
-                        let mut cell_img = image::ImageBuffer::<Luma<u8>, Vec<u8>>::from_vec(
-                            cell_size as u32,
-                            cell_size as u32,
-                            cell.transpose()
-                                .map::<u8, fn(u32) -> u8>(|value| (value / 3) as u8)
-                                .reshape_generic(
-                                    Const::<1>,
-                                    Dyn((cell_size * cell_size) as usize),
-                                )
-                                .data
-                                .into(),
-                        )
-                        .unwrap();
-                        if dark_mode {
-                            imageops::invert(&mut cell_img);
-                        }
-                        cell_img = imageops::resize(&cell_img, 8, 8, imageops::CatmullRom);
-                        let feature_vector = FeatureVector::from_image(&cell_img);
-                        let (detected_mark, similarity) = self.get_closest_feature(&feature_vector);
-                        if self.debug_output {
-                            web_sys::console::log_1(
-                                &format!("At {}:{} distance {} to {:?}", row, col, similarity, detected_mark).into(),
-                            );
-                            web_sys::console::log_1(
-                                &format!("({}, Mark::{:?}),", &feature_vector.get_data(), detected_mark).into(),
-                            );
-                        }                        
-                        if similarity <= DETECT_THRESHOLD {
-                            match detected_mark {
-                                Mark::Entrance => {
-                                    if entry_candidate.1 > similarity {
-                                        entry_candidate.0 = cells.len() - 1;
-                                    }
-                                },
-                                Mark::Treasury => {
-                                    if treasury_candidate.1 > similarity {
-                                        treasury_candidate.0 = cells.len() - 1;
-                                    }
-                                },
-                                Mark::Wall => {
-                                    // skip: this is a wrong mark in this context
-                                }
-                                _ => {
-                                    if let Some(last) = marks.last_mut() {
-                                        *last = detected_mark;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Apply found candidates to map
-        if entry_candidate.0 > 0 {
-            marks[entry_candidate.0] = Mark::Entrance;
-        }
-        if treasury_candidate.0 > 0 {
-            marks[treasury_candidate.0] = Mark::Treasury;
-        }
-
-        Maze {
-            grid: *grid,
-            cells,
-            marks,
-        }
-    }
-
-    /// Debug draw: paint walls black
-    pub fn debug_draw(&mut self, maze: &Maze) {
-        for row in 0..maze.grid.row_count {
-            for col in 0..maze.grid.col_count {
-                let mut cell = self.pixels.view_mut(
-                    (
-                        maze.grid.row_offset + row * maze.grid.size + 1,
-                        maze.grid.col_offset + col * maze.grid.size + 1,
-                    ),
-                    (maze.grid.size - 1, maze.grid.size - 1),
-                );
-                if maze.cells[row * maze.grid.col_count + col] == Cell::Wall {
-                    cell.fill(0);
-                }
-            }
-        }
     }
 
     /// Find closest feature and report its distance
@@ -653,8 +383,7 @@ impl ImageProcessor {
             })
     }
 
-    #[wasm_bindgen]
-    pub fn recognize_cell() -> Mark {
+    fn recognize_cell() -> Mark {
         //let nn_weights = NetworkParams::from_binary_compressed("./gv_subway_nn.bin");
         let mut nn_weights: Vec<Vec<Vec<f32>>> = Vec::new();
         nn_weights.push(Vec::from([
@@ -1077,7 +806,7 @@ impl NimageProcessor {
 
         fn contrast(p: u8, min: u8, max: u8) -> u8 {
             if min == max { return u8::MAX };
-            let step: f32 = (1.0 / (max - min) as f32);
+            let step: f32 = 1.0 / (max - min) as f32;
             let mut k: f32 = (p - min) as f32 * step;
 
             // overcontrast a little
@@ -1154,11 +883,14 @@ impl NTiler {
         }
     }
 
-    pub fn predict(&mut self, data: Vec<u8>) -> Option<usize> {
+    pub fn predict(&mut self, data: &Vec<u8>) -> Option<usize> {
         let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
+        // web_sys::console::log_1(&"  predict: Remapped".into());
 
         let result = self.network.predict(&nn_data);
+        // web_sys::console::log_1(&"  predict: predicted".into());
         let max = result.iter().enumerate().max_by(|&a, &b| { if a.1 < b.1 { Ordering::Less } else if a.1 == b.1 { Ordering::Equal } else { Ordering::Greater } }).unwrap();
+        // web_sys::console::log_1(&format!("  predict: scored {:?}", max).into());
         // println!("  Predict as {}: {:?}", max.0, result);
         if *max.1 > 0.5 {
             Some(max.0 as usize)
@@ -1171,6 +903,7 @@ impl NTiler {
         let weights = include_bytes!("../nn.bin");        
         let params = NetworkParams(bincode::borrow_decode_from_slice(weights, bincode::config::standard()).unwrap().0);
         self.network.load_params(&params);
+        web_sys::console::log_1(&format!("  Weights: {:?}", params.0).into());
     }
 }
 
@@ -1258,18 +991,30 @@ impl Explorer {
         }
     }
 
-    pub fn print_layout(&self) {
+    /// Get explored maze dimensions: width, height, offset of left top corner
+    pub fn get_dimensions(&self) -> (u8, u8, i8, i8) {
         let (min, max) = self.queue.iter().fold(((0,0),(0,0)), |acc, cell| {
             let min_corner = (acc.0.0.min(cell.position.x), acc.0.1.min(cell.position.y));
             let max_corner = (acc.1.0.max(cell.position.x), acc.1.1.max(cell.position.y));
             (min_corner, max_corner)
         });
         let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
-        println!("  Detected size {}x{} ({} cells), min ({}, {}), max ({}, {})", size.0, size.1, size.0 as usize * size.1 as usize,
-            min.0, min.1, max.0, max.1);
-        let mut m = nalgebra::DMatrix::<u8>::default().resize(size.0 as usize, size.1 as usize, 0);
+        (size.0 as u8, size.1 as u8, min.0.into(), min.1.into())
+    }
+
+    pub fn print_layout(&self) {
+        // let (min, max) = self.queue.iter().fold(((0,0),(0,0)), |acc, cell| {
+        //     let min_corner = (acc.0.0.min(cell.position.x), acc.0.1.min(cell.position.y));
+        //     let max_corner = (acc.1.0.max(cell.position.x), acc.1.1.max(cell.position.y));
+        //     (min_corner, max_corner)
+        // });
+        // let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
+        // println!("  Detected size {}x{} ({} cells), min ({}, {}), max ({}, {})", size.0, size.1, size.0 as usize * size.1 as usize,
+        //     min.0, min.1, max.0, max.1);
+        let (width, height, min_x, min_y) = self.get_dimensions();
+        let mut m = nalgebra::DMatrix::<u8>::default().resize(width as usize, height as usize, 0);
         for cell in &self.queue {
-            let pos = ((cell.position.x - min.0) as usize, (cell.position.y - min.1) as usize);
+            let pos = ((cell.position.x - min_x) as usize, (cell.position.y - min_y) as usize);
             if let Some(p_item) = m.get_mut(pos) {
                 *p_item = 1;
             }
@@ -1277,13 +1022,132 @@ impl Explorer {
         m = m.transpose();
 
         for row in m.row_iter() {
-            let mut s = String::with_capacity(size.0 as usize);
+            let mut s = String::with_capacity(width as usize);
             for &i in row {
                 s.push( if i == 0 { '⬛' } else { '⬜' } );
             }
             println!("  {s}");
         }
     }
+}
+
+#[wasm_bindgen]
+pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
+    // read RGBA data from uint8 array into 4x(loooong) matrix
+    let mut imgbuf = image::ImageBuffer::<image::Rgba<u8>, _>::new(width as u32, height as u32);
+    
+    // quick and dirty copy from JS into Rust
+    unsafe { data.raw_copy_to_ptr(imgbuf.as_mut_ptr()); }
+
+    let proc = NimageProcessor::new("Хитро!", image::DynamicImage::from(imgbuf));
+
+    if let Some(cell) = proc.seed_square {
+        web_sys::console::log_1(&format!("Found square {cell}").into());
+    } else {
+        web_sys::console::log_1(&"No seed found".into());
+        return Maze::new();
+    }
+
+    let proc = if proc.seed_square.unwrap().width > 48 {
+        let resized_img = proc.source.resize_exact(proc.source.width() / 2, proc.source.height() / 2, imageops::Triangle);
+        NimageProcessor::new("Вдвойне хитро!", resized_img)
+    } else { proc };
+
+    web_sys::console::log_1(&"Exploring the grid".into());
+
+    let clip_rect = (0u32, 0u32, proc.source.width(), proc.source.height());
+    let mut expl = Explorer::new(proc.seed_square.unwrap());
+    while let Some(cur) = expl.current() {
+        for dir in [ExploreDirection::Left, ExploreDirection::Up, ExploreDirection::Right, ExploreDirection::Down] {
+            let next_pos = cur.position.offset(dir);
+            if expl.visited(&next_pos) { continue; }
+
+            let maybe_next_cell = cur.cell.offset(dir, (cur.cell.width / 4, cur.cell.height / 4), clip_rect);
+            if let Some(next_cell) = maybe_next_cell {
+                if let Some(aligned_cell) = proc.align_cell(&next_cell) {
+                    if aligned_cell.width.abs_diff(cur.cell.width) > 2 || aligned_cell.height.abs_diff(cur.cell.height) > 2 {
+                        // skip this cell, it is probably off
+                        // println!("  Not good: {}", aligned_cell);
+                    } else {
+                        // println!("  Enq: {}", aligned_cell);
+                        expl.enqueue(ExploreCell { position: next_pos, cell: aligned_cell });
+                    }
+                }
+            }
+        }
+        expl.advance();
+        // println!("  Q: {} / pos {}, at ({}, {})", expl.queue.len(), expl.cursor, cur.position.x, cur.position.y);
+        // web_sys::console::log_1(&format!("  Q: {} / pos {}, at ({}, {})", expl.queue.len(), expl.cursor, cur.position.x, cur.position.y).into());
+
+    }
+
+    //expl.print_layout();
+    let (width, height, offset_left, offset_top) = expl.get_dimensions();
+    let mut maze = Maze::new();
+    maze.width = width.into();
+    maze.height = height.into();
+
+    web_sys::console::log_1(&format!("  Maze size: {}x{}, top left at ({}, {})", maze.width, maze.height, offset_left, offset_top).into());
+
+    maze.cells.resize(maze.width * maze.height, Cell::Wall);
+    maze.marks.resize(maze.width * maze.height, Mark::Wall);
+
+    // recognize the tiles
+    expl.reset();
+
+    let mut cache = Vec::<(image::GrayImage, Cell, Mark)>::new();
+
+    let mut tiler = NTiler::new();
+    tiler.load();
+
+    while let Some(cur) = expl.current() {
+        let cell_x = (cur.position.x - offset_left) as u8;
+        let cell_y = (cur.position.y - offset_top) as u8;
+        let cell_idx = (cell_y * width + cell_x) as usize;
+        // web_sys::console::log_1(&format!("  At cell: ({}, {}), index {}", cell_x, cell_y, cell_idx).into());
+
+        let mut cell_type = Cell::Pass;
+        let mut cell_mark = Mark::None;
+
+        let sub = proc.extract_cell_image(&cur.cell);
+        if !NimageProcessor::is_blank_image(&sub) {
+            let sub = NimageProcessor::conform_image(&sub);
+            if !NimageProcessor::is_blank_image(&sub) {
+                let cached = cache.iter().find(|(entry, _, _)| entry.width() == sub.width() && entry.height() == sub.height() && entry.pixels().zip(sub.pixels()).all(|(p1, p2)| p1 == p2));
+                match &cached {
+                    Some((_image, t, m)) => {
+                        // web_sys::console::log_1(&format!("Cell cached: type {}  mark {}", *t, *m).into());
+                        cell_type = *t;
+                        cell_mark = *m;
+                    },
+                    None => {
+                        if let Some(prediction) = tiler.predict(&sub.clone().into_vec()) {
+                            web_sys::console::log_1(&format!("Predicted: {:?}", prediction).into());
+                            if let Ok(predicted_mark) = Mark::try_from(prediction) {
+                                cell_mark = predicted_mark;
+                                if predicted_mark == Mark::Entrance { cell_type = Cell::Entrance }
+                                else if predicted_mark == Mark::Treasury { cell_type = Cell::Exit }
+                                else if predicted_mark == Mark::Wall { cell_type = Cell::Wall };
+                            }
+                        } else {
+                            web_sys::console::log_1(&"Prediction failed".into());
+                        }
+                        cache.push((sub, cell_type, cell_mark));
+                    }
+                } ;
+            } else {
+            }
+        } else {
+        }
+        maze.cells[cell_idx] = cell_type;
+        maze.marks[cell_idx] = cell_mark;
+        
+        expl.advance();
+    };
+
+    web_sys::console::log_1(&"We're done!".into());
+    maze
+
 }
 
 #[cfg(test)]
@@ -1607,7 +1471,7 @@ mod tests {
                         } else {
                             v.rotate_right(shift as usize);
                         }
-                        let pred = tiler.predict(v);
+                        let pred = tiler.predict(&v);
                         if Some(class) != pred {
                             println!("Mismatch: {} as {:?} (jitter {jitter_x}, {jitter_y})", test_img.as_ref().unwrap().path().to_string_lossy(), pred);
                         }

@@ -66,13 +66,13 @@ function handleCellMove() {
     }
 }
 
-function handleMouseMove(evt: PointerEvent) {
-    if (evt.buttons == 1) {
+function handleMouseMove(evt: Event) {
+    if ((evt as PointerEvent).buttons == 1) {
         handleCellMove()
     }
 }
-function handleTouchMove(evt: TouchEvent) {
-    if (evt.touches.length == 1) {
+function handleTouchMove(evt: Event) {
+    if ((evt as TouchEvent).touches.length == 1) {
         handleCellMove()
     }
 }
@@ -80,8 +80,8 @@ function handleTouchMove(evt: TouchEvent) {
 </script>
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
-        @pointerdown.prevent="handleMouseMove" @pointermove="handleMouseMove" @touchstart.prevent="handleTouchMove"
-        @touchmove="handleTouchMove">{{ outer ? '·' : symbol }}
+        @pointerdown.prevent=handleMouseMove @pointermove=handleMouseMove @touchstart.prevent=handleTouchMove
+        @touchmove=handleTouchMove>{{ outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
 </template>
