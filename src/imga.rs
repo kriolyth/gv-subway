@@ -1,45 +1,18 @@
 use std::cmp::Ordering;
-use std::fmt::{Debug, Display, Write};
+use std::fmt::Display;
 
-use bitvec::prelude::BitArray;
-use image::{imageops, DynamicImage, GenericImage, GenericImageView, GrayImage, Luma};
+use image::{imageops, DynamicImage, GenericImageView, Luma};
 use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
-use nalgebra::DMatrixView;
-use nalgebra::{Const, DMatrix, DVector, Dyn};
 use wasm_bindgen::prelude::*;
 
-use jiro_nn::{model::network_model::NetworkModelBuilder};
-use jiro_nn::network::{Network, params::NetworkParams};
-
-use crate::brief::{center_mass, Brief, get_brief_vectors};
-use crate::features::FEATURE_DATA;
+use crate::brief::center_mass;
 use crate::field::{Cell, Coordinate, Subway};
 
-/// Threshold for closeness to existing feature data
-///
-/// Similarity threshold depends on the length of vectors and the number
-/// of entries in "known features" database
-const DETECT_THRESHOLD: i32 = 30;
-
 const NN_INPUT_SIZE: u32 = 12;
-
-#[wasm_bindgen]
-pub struct ImageProcessor {
-    pixels: DMatrix<u32>,
-    known_features: Vec<(FeatureVector, Mark)>,
-    debug_output: bool
-}
-
-#[wasm_bindgen]
-#[derive(Copy, Clone)]
-pub struct Grid {
-    pub size: usize,
-    pub row_offset: usize,
-    pub col_offset: usize,
-    pub row_count: usize,
-    pub col_count: usize,
-}
+const NN_IN_LAYER_SIZE: usize = (NN_INPUT_SIZE * NN_INPUT_SIZE) as usize;
+const NN_MID_LAYER_SIZE: usize = NN_IN_LAYER_SIZE / 4;
+const NN_OUT_LAYER_SIZE: usize = 16;
 
 #[wasm_bindgen]
 #[derive(Copy, Clone, PartialEq)]
@@ -80,28 +53,6 @@ impl TryFrom<usize> for Mark {
             13 => Ok(Mark::Fountain),
             _ => Err(()),
         }
-    }
-}
-
-impl Display for Mark {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let s = match self {
-            Mark::None => "⬜️",         // White large square
-            Mark::Wall => "⬛️",         // Black large square
-            Mark::Entrance => "🚪",     // Door
-            Mark::Treasury => "💰",     // Money bag
-            Mark::Subtreasury => "🪙",  // Coin
-            Mark::FinalBoss => "👹",    // Ogre
-            Mark::OtherBoss => "👾",    // Alien monster
-            Mark::Ladder => "🪜",       // Ladder
-            Mark::Trap => "⚠️",        // Warning
-            Mark::Luck => "🍀",         // Four leaf clover
-            Mark::RaiseWall => "🧱",    // Brick
-            Mark::Direction => "🧭",    // Compass
-            Mark::Scarecrow => "🪆",    // Nesting dolls (closest to scarecrow)
-            Mark::Fountain => "⛲️",    // Fountain
-        };
-        write!(f, "{s}")
     }
 }
 
@@ -179,267 +130,6 @@ impl Maze {
         self.width > 0 && self.height > 0
     }
 }
-
-impl std::fmt::Display for Grid {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter) -> Result<(), std::fmt::Error> {
-        formatter.write_str(&format!(
-            "Grid<{}x{}x{} at {},{}>",
-            self.col_count, self.row_count, self.size, self.col_offset, self.row_offset
-        ))
-    }
-}
-
-impl Default for Grid {
-    fn default() -> Self {
-        Self {
-            size: 0,
-            row_count: 0,
-            row_offset: 0,
-            col_count: 0,
-            col_offset: 0,
-        }
-    }
-}
-
-/// Stored data that describes icon features (FeatureVector)
-#[derive(Debug)]
-pub struct FeatureData {
-	pub x: i32,
-	pub y: i32,
-	pub bits_1: [u32; 6],
-	pub bits_2: [u32; 6],
-}
-
-impl Display for FeatureData {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("{:?}", self))
-    }
-}
-
-/// Icon description with BRIEF vector
-#[derive(Default)]
-pub struct FeatureVector(pub [Brief; 2]);
-
-impl FeatureVector {
-    pub fn from_image(img: &GrayImage) -> Self {
-        let sym_min = *img.iter().min().unwrap() as u16;
-        let sym_max = *img.iter().max().unwrap() as u16;
-        let thresh = if sym_max - sym_min < 30 {
-            0u8
-        } else {
-            ((sym_min * 2 + sym_max * 5) / 7) as u8
-        };
-        let binarized = imageproc::contrast::threshold(img, thresh, imageproc::contrast::ThresholdType::Binary);
-
-        // Find image center and encode BRIEF vector
-        // Blurring allows for limited imprecise matching
-        let resized = imageops::resize(&binarized, 24, 24, imageops::CatmullRom);
-        let blurred = imageops::blur(&resized, 0.6);
-        let center = center_mass(&resized);
-        FeatureVector(get_brief_vectors(&blurred, &[center, (center.0 + 1, center.1)]))
-    }
-
-    pub fn from_data(feature_data: &FeatureData) -> Self {
-        Self([
-            Brief {
-                x: feature_data.x,
-                y: feature_data.y,
-                b: BitArray::from(feature_data.bits_1),
-            },
-            Brief {
-                x: feature_data.x + 1,
-                y: feature_data.y,
-                b: BitArray::from(feature_data.bits_2),
-            },
-        ])
-    }
-
-    pub fn distance(&self, other: &FeatureVector) -> i32 {
-        // match BRIEF vectors
-        *([
-            self.0[0].distance(&other.0[0]),
-            self.0[0].distance(&other.0[1]),
-            self.0[1].distance(&other.0[1]),
-        ]
-        .iter()
-        .min()
-        .unwrap_or(&0)) as i32
-    }
-
-    #[allow(dead_code)]
-    /// create object representation in Rust notation
-    pub fn get_data(&self) -> FeatureData {
-        FeatureData {
-            x: self.0[0].x,
-            y: self.0[0].y,
-            bits_1: self.0[0].b.data,
-            bits_2: self.0[1].b.data,
-        }
-    }
-}
-
-impl Display for FeatureVector {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_fmt(format_args!("[{}, {}]", self.0[0], self.0[1]))
-    }
-}
-
-#[wasm_bindgen]
-impl ImageProcessor {
-    /// Load image and known features
-    fn from_matrix(width: usize, height: usize, matrix: DMatrix<u8>, debug: bool) -> Self {
-        Self {
-            // convert to grayscale without divide step
-            pixels: matrix
-                .cast::<u32>()
-                .compress_rows(|col| col.max() * 3)
-                // .row_sum()
-                // data is given by scan lines, but nalgebra matrices are column-major,
-                // so we reshape into a transposed matrix to match the source
-                // (may remove for production)
-                .reshape_generic(Dyn(width), Dyn(height))
-                .transpose(),
-            known_features: FEATURE_DATA
-                .iter()
-                .map(|data| (FeatureVector::from_data(&data.0), data.1))
-                .collect(),
-            debug_output: debug
-        }
-    }
-
-    #[wasm_bindgen(constructor)]
-    pub fn new(width: usize, height: usize, data: Uint8ClampedArray, debug: bool) -> Self {
-        // read RGBA data from uint8 array into 4x(loooong) matrix
-        let mut img_vector = DMatrix::zeros(4, width * height);
-        data.copy_to(img_vector.as_mut_slice());
-        // ignore alpha
-        img_vector.row_mut(3).fill(0);
-        Self::from_matrix(width, height, img_vector, debug)
-    }
-
-    pub fn from_rgba_slice(width: usize, height: usize, data: &[u8]) -> Self {
-        // read RGBA data from uint8 array into 4x(loooong) matrix
-        let mut img_vector = DMatrix::zeros(4, width * height);
-        img_vector.copy_from_slice(data);
-        // ignore alpha
-        img_vector.row_mut(3).fill(0);
-
-        Self::from_matrix(width, height, img_vector, false)
-    }
-
-    pub fn height(&self) -> u32 {
-        self.pixels.nrows() as u32
-    }
-    pub fn width(&self) -> u32 {
-        self.pixels.ncols() as u32
-    }
-
-    fn get_rgba_matrix(&self) -> DMatrix<u8> {
-        let width = self.width();
-        let height = self.height();
-        let single_row_image = self
-            .pixels
-            .transpose()
-            .map::<u8, fn(u32) -> u8>(|value| (value / 3) as u8)
-            .reshape_generic(Const::<1>, Dyn((width * height) as usize));
-        let mut rgba_image = DMatrix::<u8>::repeat(4, single_row_image.ncols(), 255);
-        rgba_image.set_row(0, &single_row_image.row(0));
-        rgba_image.set_row(1, &single_row_image.row(0));
-        rgba_image.set_row(2, &single_row_image.row(0));
-        // 4th row left at 255 for alpha
-        rgba_image
-    }
-
-    pub fn get_image_data(&self) -> Uint8ClampedArray {
-        let rgba_image = self.get_rgba_matrix();
-        let result = Uint8ClampedArray::new_with_length(4 * self.width() * self.height());
-        result.copy_from(rgba_image.as_slice());
-        result
-    }
-
-    pub fn get_image_data_vector(&self) -> Vec<u8> {
-        let rgba_image = self.get_rgba_matrix();
-        rgba_image.data.into()
-    }
-
-    /// Compare similarity between two cells of same size
-    fn compare(cell_a: &DMatrixView<u32>, cell_b: &DMatrixView<u32>) -> u32 {
-        cell_a.zip_fold(cell_b, 0u32, |acc, a_value, b_value| {
-            acc + a_value.max(b_value) - a_value.min(b_value)
-        })
-    }
-
-    /// Find closest feature and report its distance
-    fn get_closest_feature(&self, in_vector: &FeatureVector) -> (Mark, i32) {
-        self.known_features
-            .iter()
-            .fold((Mark::None, i32::MAX), |acc, f| {
-                let dist = in_vector.distance(&f.0);
-                if dist < acc.1 {
-                    (f.1, dist)
-                } else {
-                    acc
-                }
-            })
-    }
-
-    fn recognize_cell() -> Mark {
-        //let nn_weights = NetworkParams::from_binary_compressed("./gv_subway_nn.bin");
-        let mut nn_weights: Vec<Vec<Vec<f32>>> = Vec::new();
-        nn_weights.push(Vec::from([
-            vec![0.018279713, 0.3461362, 0.22054106, -0.22364981, -0.901315, 0.41882607],
-            vec![-0.008045531, 0.3819163, -0.32824752, 0.12131143, 0.54478514, -0.20752017], 
-            vec![-0.15599708, -0.13771185, 0.27119476, 0.5337623, -0.08216628, -0.35387617], 
-            vec![0.23947799, -0.00029348393, -0.40296182, -0.83399206, -0.528063, -0.23652445], 
-            vec![-0.7580066, -0.33036712, -0.5383008, 0.09558739, 0.30110666, 0.48766088], 
-            vec![0.28859696, 0.39982307, -0.2931427, -0.36331227, -0.22636908, 0.42259407], 
-            vec![0.57675976, -0.33459318, 0.23412874, -0.452864, -0.9032651, -0.6079217], 
-            vec![-0.01979156, -0.30330953, -1.1460474, 0.79546994, 1.2096947, -0.17616569], 
-            vec![0.19014135, 0.3176111, 0.53890294, 0.38607484, -0.18012175, 0.23491126], 
-            vec![0.01200102, -0.07919252, 0.05047029, 0.20355363, -0.44641268, 0.24467118]]));
-        nn_weights.push(Vec::from([
-            vec![-0.52755237, 0.67305976, 0.8634603, -0.24125734], 
-            vec![0.5629774, -0.35576233, 0.41369733, -0.6802983], 
-            vec![0.25178865, -0.9155079, 0.73697317, -0.75054413], 
-            vec![0.07890297, 0.6471681, -0.89126456, -0.5589374], 
-            vec![1.0503906, -0.5571312, 0.58928, -0.9909095], 
-            vec![-0.34184012, -0.87291986, 0.32032758, 0.96044314], 
-            vec![1.1638734, 0.08001668, 0.35622814, -0.5271859]]));
-        let mut network = make_network_model();
-        network.load_params(&NetworkParams(nn_weights));
-        let input: Vec<f32> = vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0];
-        let result = network.predict(&input);
-        let max = result.iter().enumerate().max_by(|(_ix1, v1), (_ix2, v2)| if v1 < v2 { Ordering::Less} else { Ordering::Greater });
-        match max {
-            Some((0, _)) => Mark::Wall,
-            Some((1, _)) => Mark::Entrance,
-            Some((2, _)) => Mark::Treasury,
-            Some(_) => Mark::Ladder,
-            None => Mark::None
-        }
-    }
-}
-
-fn make_network_model() -> Network {
-    let in_size = 9;
-    let hidden_out_size = 6;
-    let out_size = 4;
-
-    let network_model = NetworkModelBuilder::new()
-        .full_dense(hidden_out_size)
-            .init_uniform_signed()
-            .adam()
-            .tanh()
-        .end()
-        .full_dense(out_size)
-            .init_zeros()
-            .adam()
-            .softmax()
-        .end()
-    .build();
-    network_model.to_network(in_size)
-}
-
 
 /// Dimensions of white space inside a cell
 #[derive(Clone, Copy)]
@@ -531,8 +221,6 @@ impl CellDim {
         }
     }
 }
-
-
 
 struct NimageProcessor {
     pub name: String,
@@ -643,18 +331,6 @@ impl NimageProcessor {
         Self { name: name.to_owned(), source, dark_mode, seed_square }
     }
 
-    fn find_best_lbp(bin_img: &image::GrayImage, pattern: u8, area: (core::ops::Range<u32>, core::ops::Range<u32>), default: (u32, u32)) -> (u32, u32) {
-        for x in area.0 {
-            for y in area.1.clone() {
-                let pt = imageproc::local_binary_patterns::local_binary_pattern(bin_img, x, y).unwrap();
-                if pt == pattern {
-                    return (x, y);
-                }
-            }
-        }
-        default
-    }
-
     fn find_inner_border_offset(int_img: &image::ImageBuffer<Luma<u32>, Vec<u32>>, direction: ExploreDirection, range: u32) -> Option<u32> {
         let mut dip_offset = None;
         for offset in 0..=range {
@@ -714,32 +390,6 @@ impl NimageProcessor {
             if blank {break}
         }
         pt
-    }
-
-    fn align_corners(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
-        let range = cell.width / 4;
-        let r_left = 1..(range + 1);
-        let r_right = (bin_img.width() - range - 1)..(bin_img.width() - 1);
-        let r_top = 1..(range + 1);
-        let r_bottom = (bin_img.height() - range - 1)..(bin_img.height() - 1);
-
-        let left_top = Self::find_best_lbp(bin_img, Self::TOP_LEFT_CORNER, (r_left.clone(), r_top.clone()), (r_left.end, r_top.end));
-        let right_top = Self::find_best_lbp(bin_img, Self::TOP_RIGHT_CORNER, (r_right.clone(), r_top.clone()), (r_right.start, r_top.end));
-        let left_bot = Self::find_best_lbp(bin_img, Self::BOTTOM_LEFT_CORNER, (r_left.clone(), r_bottom.clone()), (r_left.end, r_bottom.start));
-        let right_bot = Self::find_best_lbp(bin_img, Self::BOTTOM_RIGHT_CORNER, (r_right.clone(), r_bottom.clone()), (r_right.start, r_bottom.start));
-        
-        let left = left_top.0.max(left_bot.0);
-        let right = right_top.0.min(right_bot.0);
-        let top = left_top.1.max(right_top.1);
-        let bottom = left_bot.1.min(right_bot.1);
-
-        let width = right - left;
-        let height = bottom - top;
-        if width.abs_diff(cell.width) > 2 || height.abs_diff(cell.height) > 2 {
-            None
-        } else {
-            Some(CellDim { x: left, y: top, width, height })
-        }
     }
 
     fn align_borders(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
@@ -853,45 +503,49 @@ impl NimageProcessor {
 }
 
 pub struct NTiler {
-    pub network: Network,
+    mid_layer: nalgebra::SMatrix::<f32, NN_MID_LAYER_SIZE, NN_IN_LAYER_SIZE>,
+    mid_layer_bias: nalgebra::SVector::<f32, NN_MID_LAYER_SIZE>,
+    out_layer: nalgebra::SMatrix::<f32, NN_OUT_LAYER_SIZE, NN_MID_LAYER_SIZE>,
+    out_layer_bias: nalgebra::SVector::<f32, NN_OUT_LAYER_SIZE>,
 }
 
 impl NTiler {
-    fn make_network_model() -> Network {
-        let in_size: usize = (NN_INPUT_SIZE * NN_INPUT_SIZE).try_into().unwrap();
-        let hidden_out_size = in_size / 4;
-        let out_size = 16;
-
-        let network_model = NetworkModelBuilder::new()
-            .full_dense(hidden_out_size)
-                .init_uniform_signed()
-                .adam()
-                .tanh()
-            .end()
-            .full_dense(out_size)
-                .init_uniform()
-                .adam()
-                .softmax()
-            .end()
-        .build();
-        network_model.to_network(in_size as usize)
-    }
-
     pub fn new() -> Self {
         Self {
-            network: Self::make_network_model()
+            mid_layer: nalgebra::SMatrix::zeros(),
+            out_layer: nalgebra::SMatrix::zeros(),
+            mid_layer_bias: nalgebra::SVector::zeros(),
+            out_layer_bias: nalgebra::SVector::zeros(),
         }
     }
 
-    pub fn predict(&mut self, data: &Vec<u8>) -> Option<usize> {
-        let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
-        // web_sys::console::log_1(&"  predict: Remapped".into());
+    fn forward(&self, data: Vec<f32>) -> Vec<f32> {
+        // activation functions adapted from jiro_nn
+        fn tanh(v: &mut f32) {
+            let exp = v.exp();
+            let exp_neg = (-*v).exp();
+            *v = (exp - exp_neg) / (exp + exp_neg);
+        }
 
-        let result = self.network.predict(&nn_data);
-        // web_sys::console::log_1(&"  predict: predicted".into());
+        fn softmax(v: &nalgebra::SVector<f32, 16>) -> nalgebra::SVector<f32, 16> {
+            let m = v.max();
+            let exps = v.add_scalar(-m).apply_into(|v| {*v = v.exp();});
+            let sum = exps.sum();
+            exps / sum
+        }
+        
+        let input = nalgebra::SVector::<f32, NN_IN_LAYER_SIZE>::from_vec(data);
+        let middle = (self.mid_layer * input + self.mid_layer_bias).apply_into(tanh);
+        let output = self.out_layer * middle + self.out_layer_bias;
+        softmax(&output).into_iter().map(|&v| v).collect()
+    }
+
+    pub fn predict(&self, data: &Vec<u8>) -> Option<usize> {
+        let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
+
+        let result = self.forward(nn_data);
         let max = result.iter().enumerate().max_by(|&a, &b| { if a.1 < b.1 { Ordering::Less } else if a.1 == b.1 { Ordering::Equal } else { Ordering::Greater } }).unwrap();
-        // web_sys::console::log_1(&format!("  predict: scored {:?}", max).into());
-        // println!("  Predict as {}: {:?}", max.0, result);
+
         if *max.1 > 0.5 {
             Some(max.0 as usize)
         } else {
@@ -901,9 +555,15 @@ impl NTiler {
 
     pub fn load(&mut self) {
         let weights = include_bytes!("../nn.bin");        
-        let params = NetworkParams(bincode::borrow_decode_from_slice(weights, bincode::config::standard()).unwrap().0);
-        self.network.load_params(&params);
-        web_sys::console::log_1(&format!("  Weights: {:?}", params.0).into());
+        let params: Vec<Vec<Vec<f32>>> = bincode::borrow_decode_from_slice(weights, bincode::config::standard()).unwrap().0;
+
+        let first_layer = params.first().unwrap();
+        self.mid_layer = nalgebra::SMatrix::from_iterator(first_layer.iter().flatten().map(|&v| v));
+        self.mid_layer_bias = nalgebra::SVector::from_vec(first_layer.last().unwrap().clone());
+
+        let second_layer = params.last().unwrap();
+        self.out_layer = nalgebra::SMatrix::from_iterator(second_layer.iter().flatten().map(|&v| v));
+        self.out_layer_bias = nalgebra::SVector::from_vec(second_layer.last().unwrap().clone());
     }
 }
 
@@ -944,11 +604,6 @@ impl CellMazePos {
 struct ExploreCell {
     pub position: CellMazePos,
     pub cell: CellDim
-}
-
-struct MaybeExploreCell {
-    pub position: CellMazePos,
-    pub cell: UnalignedCellDim
 }
 
 struct Explorer {
@@ -1003,12 +658,6 @@ impl Explorer {
     }
 
     pub fn print_layout(&self) {
-        // let (min, max) = self.queue.iter().fold(((0,0),(0,0)), |acc, cell| {
-        //     let min_corner = (acc.0.0.min(cell.position.x), acc.0.1.min(cell.position.y));
-        //     let max_corner = (acc.1.0.max(cell.position.x), acc.1.1.max(cell.position.y));
-        //     (min_corner, max_corner)
-        // });
-        // let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
         // println!("  Detected size {}x{} ({} cells), min ({}, {}), max ({}, {})", size.0, size.1, size.0 as usize * size.1 as usize,
         //     min.0, min.1, max.0, max.1);
         let (width, height, min_x, min_y) = self.get_dimensions();
@@ -1041,10 +690,8 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
 
     let proc = NimageProcessor::new("Хитро!", image::DynamicImage::from(imgbuf));
 
-    if let Some(cell) = proc.seed_square {
-        web_sys::console::log_1(&format!("Found square {cell}").into());
-    } else {
-        web_sys::console::log_1(&"No seed found".into());
+    if proc.seed_square.is_none() {
+        web_sys::console::log_1(&"Не срослось".into());
         return Maze::new();
     }
 
@@ -1067,27 +714,22 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
                 if let Some(aligned_cell) = proc.align_cell(&next_cell) {
                     if aligned_cell.width.abs_diff(cur.cell.width) > 2 || aligned_cell.height.abs_diff(cur.cell.height) > 2 {
                         // skip this cell, it is probably off
-                        // println!("  Not good: {}", aligned_cell);
                     } else {
-                        // println!("  Enq: {}", aligned_cell);
                         expl.enqueue(ExploreCell { position: next_pos, cell: aligned_cell });
                     }
                 }
             }
         }
         expl.advance();
-        // println!("  Q: {} / pos {}, at ({}, {})", expl.queue.len(), expl.cursor, cur.position.x, cur.position.y);
         // web_sys::console::log_1(&format!("  Q: {} / pos {}, at ({}, {})", expl.queue.len(), expl.cursor, cur.position.x, cur.position.y).into());
-
     }
 
-    //expl.print_layout();
     let (width, height, offset_left, offset_top) = expl.get_dimensions();
     let mut maze = Maze::new();
     maze.width = width.into();
     maze.height = height.into();
 
-    web_sys::console::log_1(&format!("  Maze size: {}x{}, top left at ({}, {})", maze.width, maze.height, offset_left, offset_top).into());
+    web_sys::console::log_1(&format!("  Maze size: {}x{}", maze.width, maze.height).into());
 
     maze.cells.resize(maze.width * maze.height, Cell::Wall);
     maze.marks.resize(maze.width * maze.height, Mark::Wall);
@@ -1106,13 +748,20 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
         let cell_idx = (cell_y * width + cell_x) as usize;
         // web_sys::console::log_1(&format!("  At cell: ({}, {}), index {}", cell_x, cell_y, cell_idx).into());
 
-        let mut cell_type = Cell::Pass;
+        let mut cell_type = Cell::Wall;
         let mut cell_mark = Mark::None;
 
         let sub = proc.extract_cell_image(&cur.cell);
-        if !NimageProcessor::is_blank_image(&sub) {
+        if NimageProcessor::is_blank_image(&sub) {
+            cell_type = Cell::Pass;
+            cell_mark = Mark::None;
+        } else {
             let sub = NimageProcessor::conform_image(&sub);
-            if !NimageProcessor::is_blank_image(&sub) {
+            if NimageProcessor::is_blank_image(&sub) {
+                // could become blank after conforming
+                cell_type = Cell::Pass;
+                cell_mark = Mark::None;                
+            } else {
                 let cached = cache.iter().find(|(entry, _, _)| entry.width() == sub.width() && entry.height() == sub.height() && entry.pixels().zip(sub.pixels()).all(|(p1, p2)| p1 == p2));
                 match &cached {
                     Some((_image, t, m)) => {
@@ -1122,176 +771,60 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
                     },
                     None => {
                         if let Some(prediction) = tiler.predict(&sub.clone().into_vec()) {
-                            web_sys::console::log_1(&format!("Predicted: {:?}", prediction).into());
                             if let Ok(predicted_mark) = Mark::try_from(prediction) {
-                                cell_mark = predicted_mark;
                                 if predicted_mark == Mark::Entrance { cell_type = Cell::Entrance }
                                 else if predicted_mark == Mark::Treasury { cell_type = Cell::Exit }
-                                else if predicted_mark == Mark::Wall { cell_type = Cell::Wall };
+                                else if predicted_mark != Mark::Wall { cell_type = Cell::Pass };
+                                cell_mark = predicted_mark;
                             }
                         } else {
-                            web_sys::console::log_1(&"Prediction failed".into());
+                            web_sys::console::log_1(&"  Что-то не распозналось".into());
                         }
                         cache.push((sub, cell_type, cell_mark));
                     }
-                } ;
-            } else {
+                }
             }
-        } else {
         }
+        if cell_mark == Mark::Wall {
+            cell_mark = Mark::None;
+        }
+
         maze.cells[cell_idx] = cell_type;
         maze.marks[cell_idx] = cell_mark;
         
         expl.advance();
     };
 
-    web_sys::console::log_1(&"We're done!".into());
     maze
 
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{ops::{Deref, Rem}, str::FromStr};
+    use std::str::FromStr;
 
     use super::*;
-    use image::{GenericImage, GenericImageView, SubImage};
-    use imageproc::contrast::ThresholdType;
+    use image;
     use wasm_bindgen_test::*;
 
-    #[wasm_bindgen_test]
-    fn img_1_pixel() {
-        let arr = Uint8ClampedArray::new_with_length(4);
-        arr.fill(0, 0, 4);
-        let img = ImageProcessor::new(1, 1, arr, false);
-        assert_eq!(img.pixels[(0, 0)], 0);
+    use jiro_nn::{model::network_model::NetworkModelBuilder};
+    use jiro_nn::network::Network;
 
-        let arr = Uint8ClampedArray::new_with_length(4);
-        arr.fill(255, 0, 4);
-        let img = ImageProcessor::new(1, 1, arr, false);
-        assert_eq!(img.pixels[(0, 0)], 255 * 3);
-    }
-
-    #[wasm_bindgen_test]
-    fn img_2_pixel() {
-        let arr = Uint8ClampedArray::new_with_length(8);
-        for idx in 0..8 {
-            arr.set_index(idx, idx as u8);
-        }
-        let img = ImageProcessor::new(2, 1, arr, false);
-        assert_eq!(img.pixels[(0, 0)], 6);
-        assert_eq!(img.pixels[(0, 1)], 18);
-    }
-
-    #[wasm_bindgen_test]
-    fn img_2x2_pixel() {
-        let arr = Uint8ClampedArray::new_with_length(16);
-        for idx in 0..16 {
-            arr.set_index(idx, idx as u8);
-        }
-        let img = ImageProcessor::new(2, 2, arr, false);
-        assert_eq!(img.pixels[(0, 0)], 6);
-        assert_eq!(img.pixels[(0, 1)], 18);
-        assert_eq!(img.pixels[(1, 0)], 30);
-        assert_eq!(img.pixels[(1, 1)], 42);
-
-        let arr = img.get_image_data();
-        assert_eq!(
-            arr.to_vec(),
-            vec![2, 2, 2, 255, 6, 6, 6, 255, 10, 10, 10, 255, 14, 14, 14, 255]
-        );
-    }
-
-    fn make_image_grid(dim: (u32, u32), cell_size: u32, pad: (u32, u32), thickness: u32) -> (Vec<u8>, usize, usize) {
-        let mut result = Vec::<u8>::new();
-        let total_width = pad.0 * 2 + dim.0 * cell_size + thickness;
-        let total_height = pad.1 * 2 + dim.1 * cell_size + thickness;
-        result.resize((4 * total_width * total_height) as usize, 255);
-        for x in 0..total_width - pad.0 * 2 {
-            for y in 0..total_height - pad.1 * 2 {
-                let index = (pad.0 + x + (pad.1 + y) * total_width) as usize;
-                let is_border = ((x.rem(cell_size) < thickness) || (y.rem(cell_size) < thickness))
-                    && (x.saturating_sub(thickness) / cell_size < dim.0)
-                    && (y.saturating_sub(thickness) / cell_size < dim.1);
-                if is_border {
-                    result[index * 4] = 16;
-                    result[index * 4+1] = 16;
-                    result[index * 4+2] = 16;
-                    result[index * 4+3] = 0;
-                } else {
-                    result[index * 4] = 241;
-                    result[index * 4+1] = 241;
-                    result[index * 4+2] = 241;
-                    result[index * 4+3] = 0;
-                }
-            }
-        }
-        (result, total_width as usize, total_height as usize)
-    }
-    #[test]
-    #[ignore]
-    fn construct_processor() {
-        let (img_data, width, height) = make_image_grid((6,9), 15, (8, 3), 2);
-        let proc = ImageProcessor::from_rgba_slice(width, height, &img_data);
-        let grid = proc.detect_grid();
-        assert_eq!(grid.size, 15);
-        assert_eq!(grid.row_offset, 3);
-        assert_eq!(grid.col_offset, 8);
-        assert_eq!(grid.row_count, 7);
-        assert_eq!(grid.col_count, 6);
-    }
-
-    #[test]
-    #[ignore]
-    fn make_nn() {
-        use jiro_nn::{loss::Losses, model::network_model::NetworkModelBuilder};
-        let mut training_data_in = vec![
-            vec![0.0, 1.0, 0.0, 1.0, 1.0, 1.0, 0.0, 1.0, 0.0],
-            vec![1.0, 1.0, 1.0, 1.0, 0.0, 1.0, 1.0, 1.0, 1.0],
-            vec![1.0, 0.0, 1.0, 1.0, 0.0, 1.0, 1.0, 0.0, 1.0],
-            vec![0.0, 0.0, 0.0, 1.0, 1.0, 1.0, 0.0, 0.0, 0.0],
-        ];
-
-        let mut training_data_out = vec![
-            vec![1.0, 0.0, 0.0, 0.0], 
-            vec![0.0, 1.0, 0.0, 0.0], 
-            vec![0.0, 0.0, 1.0, 0.0], 
-            vec![0.0, 0.0, 0.0, 1.0],
-        ];
-        for i in 0..4 {
-            training_data_in.push(training_data_in[i].iter().map(|f| 1.0 - f).collect());
-            training_data_out.push(training_data_out[i].clone());
-        }
-
-        let in_size = 9;
-        let hidden_out_size = 6;
-        let out_size = 4;
-
-        let mut network = make_network_model();
-
-        let loss = Losses::MSE.to_loss();
-        let batch_size = 4;
-
-        for epoch in 0..20000 {
-            let error = network.train(
-                epoch,
-                &training_data_in,
-                &training_data_out,
-                &loss,
-                batch_size,
-            );
-
-            if epoch % 1000 == 0 {
-                println!("Epoch: {} Average training loss: {}", epoch, error);
-            }
-        }
-
-        network.get_params().to_binary_compressed("./gv_subway_nn.bin");
-        println!("{:?}", network.get_params().0);
-        println!("Predict 1: {:?}", network.predict(&training_data_in[0]));
-        println!("Predict 2: {:?}", network.predict(&vec![0.1, 0.09, 0.11, 0.94, 0.8, 0.75, 0.12, 0.14, 0.02]));
-
-    }
+    fn make_network_model() -> Network {
+        let network_model = NetworkModelBuilder::new()
+            .full_dense(NN_MID_LAYER_SIZE)
+                .init_uniform_signed()
+                .adam()
+                .tanh()
+            .end()
+            .full_dense(NN_OUT_LAYER_SIZE)
+                .init_uniform()
+                .adam()
+                .softmax()
+            .end()
+        .build();
+        network_model.to_network(NN_IN_LAYER_SIZE)
+    }    
 
     #[test]
     #[ignore]
@@ -1415,13 +948,13 @@ mod tests {
 
         println!("Prepared {} training samples", train_in.len());
 
-        let mut tiler = NTiler::new();
+        let mut network = make_network_model();
 
         let loss = Losses::BCE.to_loss();
         let batch_size = 2048;
 
         for epoch in 0..4000 {
-            let error = tiler.network.train(
+            let error = network.train(
                 epoch,
                 &train_in,
                 &train_out,
@@ -1434,10 +967,8 @@ mod tests {
             }
         }
 
-        tiler.network.get_params().to_binary_compressed("./gv_subway_nn.bin");
-
         let mut file = std::fs::File::create("./nn.bin").unwrap();
-        bincode::encode_into_std_write(tiler.network.get_params().0, &mut file, bincode::config::standard()).unwrap();
+        bincode::encode_into_std_write(network.get_params().0, &mut file, bincode::config::standard()).unwrap();
     }
 
     #[test]
@@ -1446,7 +977,7 @@ mod tests {
         const TEST: &str = "./data/proc/test-six";
 
         let mut tiler = NTiler::new();
-        tiler.network.load_params(&NetworkParams::from_binary_compressed("./gv_subway_nn.bin"));
+        tiler.load();
 
         // evaluate
         for class_dir in std::fs::read_dir(TEST).unwrap() {
