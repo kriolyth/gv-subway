@@ -66,10 +66,12 @@ pub fn get_brief_vectors(blurred_img: &GrayImage, vec: &[Point; 2]) -> [Brief; 2
 /// (dark pixels have most leasing zeros in binary representation)
 pub fn center_mass(img: &GrayImage) -> Point {
     let total = img.enumerate_pixels().fold((0, 0, 0i32), |acc, en| {
+        let clr = 10 - ((en.2[0] as u16) * 3 + 1).ilog2().min(9);
+        let weight: i32 = (clr * clr) as i32;
         (
-            acc.0 + en.0 as i32 * (en.0.leading_zeros() + 1).min(8) as i32,
-            acc.1 + en.1 as i32 * (en.1.leading_zeros() + 1).min(8) as i32,
-            acc.2 + 8,
+            acc.0 + en.0 as i32 * weight,
+            acc.1 + en.1 as i32 * weight,
+            acc.2 + weight,
         )
     });
     if total.2 > 0 {

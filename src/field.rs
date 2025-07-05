@@ -15,6 +15,18 @@ pub enum Cell {
     Exit = 3,
 }
 
+impl std::fmt::Display for Cell {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let s = match self {
+            Cell::Wall => "#",
+            Cell::Pass => " ",
+            Cell::Entrance => "🚪",
+            Cell::Exit => "💰",
+        };
+        write!(f, "{}", s)
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq)]
 enum Direction {
     North = 0,

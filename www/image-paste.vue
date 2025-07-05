@@ -10,7 +10,7 @@
 </template>
 <script lang="ts">
 import { defineComponent } from "vue";
-import { ImageProcessor } from "../pkg/gv_subway";
+import { get_maze } from "../pkg/gv_subway";
 
 export default defineComponent({
     setup() {},
@@ -52,30 +52,18 @@ export default defineComponent({
             if (imageData) {
                 vm.processingState = "Загружаем...";
                 try {
-                    let processor = new ImageProcessor(
-                        imageData.width,
-                        imageData.height,
-                        imageData.data,
-                        vm.debugOutput
-                    );
                     vm.processingState = "Проверяем...";
-                    let maze = processor.detect_maze(processor.detect_grid());
+                    let maze = get_maze(imageData.width,
+                        imageData.height,
+                        imageData.data);
+
                     if (maze.is_valid()) {
                         vm.processingState = "Схема получена";
                         vm.$emit("haveMaze", maze);
-
-                        processor.debug_draw(maze);
                     } else {
                         vm.processingState =
                             "Загрузить схему подземки не удалось";
                     }
-                    let backpixels = processor.get_image_data();
-                    let newImage = new ImageData(
-                        backpixels,
-                        pixxa.width,
-                        pixxa.height
-                    );
-                    pixxa.getContext("2d")?.putImageData(newImage, 0, 0);
                 } catch (e) {
                     alert(e);
                     vm.processingState = "";

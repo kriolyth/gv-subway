@@ -40,6 +40,39 @@ npm run serve
 npm run build
 ```
 
+## Updating the model
+
+Field mards are recognized with a small neural network. To accommodate for the new symbols this network has to be retrained.
+
+1. Place screenshots into `data/mazes` directory.
+
+2. Comment `#[ignore]` tag in `imga.rs:split_img()` test.
+
+Start the test with 
+```
+cargo test --lib --target x86_64-pc-windows-msvc -- --nocapture
+```
+
+The test will split screenshots from `data/mazes` into separate cells in `data/proc` directory.
+
+3. Move files into separate directories named as class numbers (see `imga.rd:Mark` type).
+
+Save some of the files for evaluation. Update directories in `train_nn` and `evaluate_nn` tests.
+
+4. Restore the `#[ignore]` tag on `split_img` test and remove the same tag on `train_nn` test.
+
+Start the test with 
+```
+cargo test --lib --target x86_64-pc-windows-msvc -- --nocapture
+```
+
+The test will create or overwrite `nn.bin` file, which will be compiled in the binary on the next run.
+
+5. Restore the `#[ignore]` tag on `train_nn` test and remove the same tag on `evaluate_nn` test.
+
+Start the test the same way.
+
+
 ## License
 
 Licensed under Apache License, Version 2.0, ([LICENSE](LICENSE)).
