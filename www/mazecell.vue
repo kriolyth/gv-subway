@@ -82,10 +82,7 @@ function handleMouseDown(evt: Event) {
     }
 }
 function handleTouchDown(evt: Event) {
-    if ((evt as TouchEvent).touches.length == 1) {
-        evt.preventDefault();
-        handleCellDown()
-    }
+    handleCellDown()
 }
 
 function handleMouseMove(evt: Event) {
@@ -94,8 +91,24 @@ function handleMouseMove(evt: Event) {
     }
 }
 function handleTouchMove(evt: Event) {
-    if ((evt as TouchEvent).touches.length == 1) {
-        evt.preventDefault();
+    let tevt = evt as TouchEvent;
+    if (tevt.targetTouches.length == 0) {
+        return;
+    }
+    evt.preventDefault();
+    evt.stopPropagation();
+    let touch = tevt.targetTouches[0];
+    let el = document.elementFromPoint(touch.clientX, touch.clientY)
+    if (el && el != touch.target) {
+        let newTouch = new Touch({
+            target: el, identifier: touch.identifier + 1003,
+            clientX: touch.clientX, clientY: touch.clientY,
+            pageX: touch.pageX, pageY: touch.pageY,
+            screenX: touch.screenX, screenY: touch.screenY,
+            radiusX: touch.radiusX, radiusY: touch.radiusY
+        });
+        el.dispatchEvent(new TouchEvent(tevt.type, {touches: [newTouch], changedTouches: [newTouch], targetTouches: [newTouch]}))        
+    } else {
         handleCellMove()
     }
 }
@@ -103,8 +116,8 @@ function handleTouchMove(evt: Event) {
 </script>
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
-        @pointerdown.prevent.stop.left=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent.stop=handleTouchDown
-        @touchmove=handleTouchMove>{{ outer ? '·' : symbol }}
+        @pointerdown.prevent.stop.left=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent=handleTouchDown
+        @touchmove.prevent.stop=handleTouchMove>{{ outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
 </template>

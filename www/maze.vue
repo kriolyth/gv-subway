@@ -61,11 +61,15 @@ function isBorderCell(rowIndex: number, colIndex: number) {
 <style>
 #field {
     width: 500px;
+    user-select: none;
     touch-action: manipulation;
 }
 
 .row {
     cursor: pointer;
     line-height: 10px;
+
+    user-select: none;
+    touch-action: manipulation;
 }
 </style>
