@@ -83,9 +83,6 @@ function handleMouseDown(evt: Event) {
             evt.preventDefault();
             return;
         }
-        if (window.location.search.substring(1).includes('debug=1')) {
-            console.log("  Mouse down:", evt)
-        }        
         handleCellDown()
     }
 }
@@ -100,9 +97,6 @@ function handleMouseMove(evt: Event) {
             evt.preventDefault();
             return;
         }
-        if (window.location.search.substring(1).includes('debug=1')) {
-            console.log("  Mouse move:", evt)
-        }
         handleCellMove()
     }
 }
@@ -114,9 +108,6 @@ function handleTouchMove(evt: Event) {
     evt.preventDefault();
     evt.stopPropagation();
     let touch = tevt.changedTouches[0];
-    if (window.location.search.substring(1).includes('debug=1')) {
-        console.log("  Touch move:", touch)
-    }
     let el = document.elementFromPoint(touch.clientX, touch.clientY)
     if (el && el != touch.target) {
         let newTouch = new Touch({
