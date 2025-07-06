@@ -664,7 +664,7 @@ impl Explorer {
         // println!("  Detected size {}x{} ({} cells), min ({}, {}), max ({}, {})", size.0, size.1, size.0 as usize * size.1 as usize,
         //     min.0, min.1, max.0, max.1);
         let (width, height, min_x, min_y) = self.get_dimensions();
-        let mut m = nalgebra::DMatrix::<u8>::default().resize(width as usize, height as usize, 0);
+        let mut m = nalgebra::DMatrix::<u8>::zeros(width as usize, height as usize);
         for cell in &self.queue {
             let pos = ((cell.position.x - min_x) as usize, (cell.position.y - min_y) as usize);
             if let Some(p_item) = m.get_mut(pos) {
@@ -675,7 +675,7 @@ impl Explorer {
 
         for row in m.row_iter() {
             let mut s = String::with_capacity(width as usize);
-            for &i in row {
+            for &i in &row {
                 s.push( if i == 0 { '⬛' } else { '⬜' } );
             }
             println!("  {s}");
@@ -899,7 +899,7 @@ mod tests {
                             let mut tiler = NTiler::new();
                             tiler.load();
                             let p = tiler.predict(&sub.clone().into_vec());
-                            //println!("  Predict: {}-{} as {:?}", num, expl.cursor, p);
+                            // println!("  Predict: {}-{} as {:?}", num, expl.cursor, p);
                             p.is_none()
                         };
                         if save {
@@ -958,6 +958,9 @@ mod tests {
                             dv.rotate_right(shift as usize);
                         }
 
+                        train_in.push(dv.clone());
+                        train_out.push(classifier_vec.clone());
+                        dv.iter_mut().for_each(|v| {*v = -*v;});
                         train_in.push(dv);
                         train_out.push(classifier_vec.clone());
                     }
@@ -972,7 +975,7 @@ mod tests {
         let loss = Losses::BCE.to_loss();
         let batch_size = 2048;
 
-        for epoch in 0..3000 {
+        for epoch in 0..16000 {
             let error = network.train(
                 epoch,
                 &train_in,
