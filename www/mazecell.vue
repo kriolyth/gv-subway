@@ -68,14 +68,23 @@ function handleCellMove() {
         lastEmitted = nowEmitted
     }
 }
+function handleCellDown() {
+    let nowEmitted = (new Date()).getTime()
+    if (nowEmitted - lastEmitted > 20) {
+        emit('touch', props.id)
+        lastEmitted = nowEmitted
+    }
+}
 
 function handleMouseDown(evt: Event) {
-    emit('touch', props.id)
-    lastEmitted = (new Date()).getTime()
+    if ((evt as PointerEvent).buttons == 1) {
+        handleCellDown()
+    }
 }
 function handleTouchDown(evt: Event) {
-    emit('touch', props.id)
-    lastEmitted = (new Date()).getTime()
+    if ((evt as TouchEvent).touches.length == 1) {
+        handleCellDown()
+    }
 }
 
 function handleMouseMove(evt: Event) {
@@ -92,8 +101,8 @@ function handleTouchMove(evt: Event) {
 </script>
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
-        @pointerdown.prevent=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent=handleTouchDown
-        @touchmove=handleTouchMove>{{ outer ? '·' : symbol }}
+        @pointerdown.prevent.stop.left=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent.stop=handleTouchDown
+        @touchmove.prevent.stop=handleTouchMove>{{ outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
 </template>
