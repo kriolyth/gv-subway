@@ -16,6 +16,9 @@ jobs:
       with:
         persist-credentials: false
         fetch-depth: 0
+    - name: Generate build version
+      id: num-commits
+      run: echo "GIT_NUM_COMMITS=$(git rev-list --count HEAD)" >> $GITHUB_ENV
     - name: Get wasm-pack    
       uses: jetli/wasm-pack-action@v0.4.0
     - name: Build
