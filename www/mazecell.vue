@@ -78,6 +78,14 @@ function handleCellDown() {
 
 function handleMouseDown(evt: Event) {
     if ((evt as PointerEvent).buttons == 1) {
+        if ((evt as PointerEvent).pointerType == "touch") {
+            evt.stopPropagation();
+            evt.preventDefault();
+            return;
+        }
+        if (window.location.search.substring(1).includes('debug=1')) {
+            console.log("  Mouse down:", evt)
+        }        
         handleCellDown()
     }
 }
@@ -93,7 +101,7 @@ function handleMouseMove(evt: Event) {
             return;
         }
         if (window.location.search.substring(1).includes('debug=1')) {
-            console.log("  Movse move:", evt)
+            console.log("  Mouse move:", evt)
         }
         handleCellMove()
     }
