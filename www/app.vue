@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onBeforeMount, watch } from "vue";
-import { Cell, Mark, Maze } from "../pkg/gv_subway";
+import { Cell, Mark, Maze, get_version, get_cookie_line } from "../pkg/gv_subway";
 import maze from "./maze.vue";
 import imagePaste from "./image-paste.vue";
 import drawtool from "./drawtool.vue"
@@ -38,6 +38,14 @@ onBeforeMount(() => {
     if (querystring.length > 0) {
         parseMap(querystring);
     }
+    let ver: string = get_version();
+    let verSpan = document.getElementById("ver");
+    if (verSpan) { verSpan.innerText = "Версия " + ver; }
+
+    let cookie: string = get_cookie_line();
+    console.log(cookie);
+    let cookieSpan = document.getElementById("witzy");
+    if (cookieSpan) { cookieSpan.innerText = cookie; }
 })
 
 function onHaveMaze(maze: Maze) {
