@@ -71,7 +71,7 @@ function updateProbabilities() {
     }
 }
 
-function touchCell(cellId: number) {
+function applyTool(cellId: number, withMove: boolean) {
     // a giant switch for different tools
     switch (stDraw.drawTool) {
         case 'none': return;
@@ -100,9 +100,12 @@ function touchCell(cellId: number) {
             break;
         case 'raise':
             // set unique mark on a wall
-            if (stField.cells[cellId].cellType == Cell.Wall) {
+            if (!withMove && stField.cells[cellId].cellType == Cell.Wall) {
                 stField.clearByTypeAndMark(Cell.Pass, Mark.RaiseWall, Cell.Wall)
                 stField.setCell(cellId, Cell.Pass, Mark.RaiseWall)
+            } else if (!withMove && stField.cells[cellId].cellType == Cell.Pass && stField.marks[cellId] == Mark.RaiseWall) {
+                stField.clearByTypeAndMark(Cell.Pass, Mark.RaiseWall, Cell.Wall)
+                stField.setCell(cellId, Cell.Wall, Mark.None)
             }
             break;
         case 'final_boss':
@@ -114,7 +117,7 @@ function touchCell(cellId: number) {
             break;
         case 'other_boss':
             // set non-unique boss mark
-            if (stField.cells[cellId].cellType == Cell.Pass) {
+            if (!withMove && stField.cells[cellId].cellType == Cell.Pass) {
                 stField.setCell(cellId, Cell.Pass, Mark.OtherBoss)
             }
             break;
@@ -132,6 +135,13 @@ function touchCell(cellId: number) {
             console.log('Pressed %s at %d', stDraw.drawTool, cellId)
     }
     updateProbabilities()
+}
+
+function touchCell(cellId: number) {
+    applyTool(cellId, false);
+}
+function moveCell(cellId: number) {
+    applyTool(cellId, true);
 }
 
 watch(() => stCalc.numSteps, (newValue, oldValue) => {
@@ -155,7 +165,7 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
     <h3>Куда уходят бревновозы</h3>
     <div id="maze">
         <drawtool></drawtool>
-        <maze :width="20" :cells="stField.cells" :marks="stField.marks" :outer="stField.outer" @touchcell="touchCell">
+        <maze :width="20" :cells="stField.cells" :marks="stField.marks" :outer="stField.outer" @touch="touchCell" @move="moveCell">
         </maze>
         <div id="calc">
             <input id="numsteps" type="range" min="0" max="100" v-model="stCalc.numSteps" />

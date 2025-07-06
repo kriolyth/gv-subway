@@ -15,6 +15,11 @@ interface Maze {
     outer: boolean[];
 }
 
+interface Emits {
+    touch: [number],
+    move: [number],
+}
+
 const props = defineProps<Maze>()
 
 const rowWidth = props.width ?? 1;
@@ -27,12 +32,13 @@ const cellRows = computed(() => {
     return result
 })
 
-const emit = defineEmits<{
-    (e: 'touchcell', id: number): void
-}>()
+const emit = defineEmits<Emits>()
 
 function reemitTouchCell(id: number) {
-    emit("touchcell", id)
+    emit("touch", id)
+}
+function reemitMoveCell(id: number) {
+    emit("move", id)
 }
 
 function isBorderCell(rowIndex: number, colIndex: number) {
@@ -48,7 +54,7 @@ function isBorderCell(rowIndex: number, colIndex: number) {
                 :mark="marks[index + rowIndex * rowWidth]" 
                 :outer="outer[index + rowIndex * rowWidth]"
                 :id="index + rowIndex * rowWidth"
-                :borderCell="isBorderCell(parseInt(rowIndex.toString()), parseInt(index.toString()))" @touchcell="reemitTouchCell"></mazecell>
+                :borderCell="isBorderCell(parseInt(rowIndex.toString()), parseInt(index.toString()))" @touch="reemitTouchCell" @move="reemitMoveCell"></mazecell>
         </div>
     </div>
 </template>

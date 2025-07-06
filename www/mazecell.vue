@@ -13,10 +13,13 @@ interface Props {
     outer?: boolean
 }
 
+interface Emits {
+    touch: [number],
+    move: [number],
+}
+
 const props = defineProps<Props>()
-const emit = defineEmits<{
-    (e: 'touchcell', id: number): void
-}>()
+const emit = defineEmits<Emits>()
 
 // local state
 let lastEmitted = 0.;
@@ -61,9 +64,18 @@ const cellColour = computed(() => {
 function handleCellMove() {
     let nowEmitted = (new Date()).getTime()
     if (nowEmitted - lastEmitted > 20) {
-        emit('touchcell', props.id)
+        emit('move', props.id)
         lastEmitted = nowEmitted
     }
+}
+
+function handleMouseDown(evt: Event) {
+    emit('touch', props.id)
+    lastEmitted = (new Date()).getTime()
+}
+function handleTouchDown(evt: Event) {
+    emit('touch', props.id)
+    lastEmitted = (new Date()).getTime()
 }
 
 function handleMouseMove(evt: Event) {
@@ -80,7 +92,7 @@ function handleTouchMove(evt: Event) {
 </script>
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
-        @pointerdown.prevent=handleMouseMove @pointermove=handleMouseMove @touchstart.prevent=handleTouchMove
+        @pointerdown.prevent=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent=handleTouchDown
         @touchmove=handleTouchMove>{{ outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
