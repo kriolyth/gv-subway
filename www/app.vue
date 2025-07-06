@@ -43,7 +43,6 @@ onBeforeMount(() => {
     if (verSpan) { verSpan.innerText = "Версия " + ver; }
 
     let cookie: string = get_cookie_line();
-    console.log(cookie);
     let cookieSpan = document.getElementById("witzy");
     if (cookieSpan) { cookieSpan.innerText = cookie; }
 })

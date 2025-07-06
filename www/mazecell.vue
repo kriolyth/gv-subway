@@ -64,15 +64,15 @@ const cellColour = computed(() => {
 function handleCellMove() {
     let nowEmitted = (new Date()).getTime()
     if (nowEmitted - lastEmitted > 20) {
-        emit('move', props.id)
         lastEmitted = nowEmitted
+        emit('move', props.id)
     }
 }
 function handleCellDown() {
     let nowEmitted = (new Date()).getTime()
     if (nowEmitted - lastEmitted > 20) {
-        emit('touch', props.id)
         lastEmitted = nowEmitted
+        emit('touch', props.id)
     }
 }
 
@@ -83,6 +83,7 @@ function handleMouseDown(evt: Event) {
 }
 function handleTouchDown(evt: Event) {
     if ((evt as TouchEvent).touches.length == 1) {
+        evt.preventDefault();
         handleCellDown()
     }
 }
@@ -94,6 +95,7 @@ function handleMouseMove(evt: Event) {
 }
 function handleTouchMove(evt: Event) {
     if ((evt as TouchEvent).touches.length == 1) {
+        evt.preventDefault();
         handleCellMove()
     }
 }
@@ -102,7 +104,7 @@ function handleTouchMove(evt: Event) {
 <template>
     <div class="cell" v-if="!props.borderCell" :class="cellClass" :style="cellColour"
         @pointerdown.prevent.stop.left=handleMouseDown @pointermove=handleMouseMove @touchstart.prevent.stop=handleTouchDown
-        @touchmove.prevent.stop=handleTouchMove>{{ outer ? '·' : symbol }}
+        @touchmove=handleTouchMove>{{ outer ? '·' : symbol }}
     </div>
     <div class="cell" v-if="props.borderCell" :class="cellClass" :style="cellColour">{{ outer ? '·' : symbol }}</div>
 </template>
