@@ -137,9 +137,15 @@ function applyTool(cellId: number, withMove: boolean) {
 }
 
 function touchCell(cellId: number) {
+    if (window.location.search.substring(1).includes('debug=1')) {
+        console.log('Tool touch: ', cellId, stDraw.drawTool)
+    }
     applyTool(cellId, false);
 }
 function moveCell(cellId: number) {
+    if (window.location.search.substring(1).includes('debug=1')) {
+        console.log('Tool move: ', cellId, stDraw.drawTool)
+    }
     applyTool(cellId, true);
 }
 

@@ -87,17 +87,28 @@ function handleTouchDown(evt: Event) {
 
 function handleMouseMove(evt: Event) {
     if ((evt as PointerEvent).buttons == 1) {
+        if ((evt as PointerEvent).pointerType == "touch") {
+            evt.stopPropagation();
+            evt.preventDefault();
+            return;
+        }
+        if (window.location.search.substring(1).includes('debug=1')) {
+            console.log("  Movse move:", evt)
+        }
         handleCellMove()
     }
 }
 function handleTouchMove(evt: Event) {
     let tevt = evt as TouchEvent;
-    if (tevt.targetTouches.length == 0) {
+    if (tevt.changedTouches.length == 0) {
         return;
     }
     evt.preventDefault();
     evt.stopPropagation();
-    let touch = tevt.targetTouches[0];
+    let touch = tevt.changedTouches[0];
+    if (window.location.search.substring(1).includes('debug=1')) {
+        console.log("  Touch move:", touch)
+    }
     let el = document.elementFromPoint(touch.clientX, touch.clientY)
     if (el && el != touch.target) {
         let newTouch = new Touch({
