@@ -93,6 +93,9 @@ pub struct Subway {
 
     /// jump moves enabled
     jumpy: bool,
+
+    /// is it on the second floor (affects entrance marks and exit through entrance)
+    second_floor: bool,
 }
 impl Default for Subway {
     fn default() -> Self {
@@ -116,6 +119,7 @@ impl Subway {
             visited: SVector::zeros(),
             movers: SMatrix::zeros(),
             jumpy: false,
+            second_floor: false,
         }
     }
 
@@ -145,6 +149,16 @@ impl Subway {
     /// Get probability for a cell
     pub fn get_visited_probability(&self, idx: usize) -> f64 {
         self.visited[idx]
+    }
+
+    /// Set if this maze is on the second floor
+    pub fn set_second_floor(&mut self, is_second_floor: bool) {
+        self.second_floor = is_second_floor;
+    }
+
+    /// Check if this maze is on the second floor
+    pub fn is_second_floor(&self) -> bool {
+        self.second_floor
     }
 
     /// Mover directions when looking from south
@@ -179,7 +193,7 @@ impl Subway {
 
         // Walls and exit conditions
         if (self.field[idx] == Cell::Wall)
-            || (self.field[idx] == Cell::Entrance && move_count >= 20)
+            || (self.field[idx] == Cell::Entrance && move_count >= 20 && !self.second_floor)
             || (self.field[idx] == Cell::Exit)
         {
             return ([idx; 8], DirVec::zeros());

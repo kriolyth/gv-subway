@@ -26,10 +26,15 @@ export const stField = reactive({
     marks: (new Array(400)).fill(null).map(_ => Mark.None),
     outer: (new Array(400)).fill(null).map(_ => false),
     isJumpy: false,
+    isSecondFloor: false,
     earlyEntranceVisitors: 0., // fraction visited entrance before 20th step
 
     recalculate(numSteps: number, updateFrom: number = 0) {
-        if (!updateFrom) this.field.init(this.isJumpy);
+        if (!updateFrom) {
+            this.field.init(this.isJumpy);
+            this.field.set_second_floor(this.isSecondFloor);
+        }
+        
         for (let i = 1; i <= numSteps; i++) {
             this.field.step(i + updateFrom);
             if (i + updateFrom <= 19) {
@@ -56,6 +61,13 @@ export const stField = reactive({
         }
     },
 
+    hasEntrance() {
+        return this.cells.some(v => v.cellType == Cell.Entrance)
+    },
+    entranceMark() {
+        return this.isSecondFloor ? Mark.Ladder : Mark.Entrance
+    },
+
     /// Set new cell type with automatic mark
     setCell(cellIdx: number, cellType: Cell, mark?: Mark) {
         this.field.set_field(cellIdx, cellType)
@@ -64,14 +76,14 @@ export const stField = reactive({
             // update field failed
             return;
         if (cellType == Cell.Entrance)
-            this.marks[cellIdx] = Mark.Entrance
+            this.marks[cellIdx] = this.entranceMark()
         else if (cellType == Cell.Exit)
             this.marks[cellIdx] = mark ?? Mark.Treasury
         else if (cellType == Cell.Pass) {
             // for space: keep marks, unless it is a specialized mark
             if (mark !== undefined)
                 this.marks[cellIdx] = mark
-            else if ([Mark.RaiseWall, Mark.Entrance, Mark.Treasury, Mark.Subtreasury].indexOf(this.marks[cellIdx]) >= 0)
+            else if ([Mark.RaiseWall, this.entranceMark(), Mark.Treasury, Mark.Subtreasury].indexOf(this.marks[cellIdx]) >= 0)
                 this.marks[cellIdx] = Mark.None
         }
         else
@@ -113,8 +125,7 @@ export const stDraw = reactive({
 })
 export const stCalc = reactive({
     numSteps: 0,
-    probes: new Set<Mark>([Mark.Entrance, Mark.Treasury, Mark.Subtreasury,
-    Mark.FinalBoss, Mark.OtherBoss])
+    probes: new Set<Mark>([Mark.Entrance, Mark.Treasury, Mark.Subtreasury, Mark.FinalBoss, Mark.OtherBoss])
 })
 
 
