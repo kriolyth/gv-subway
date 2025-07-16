@@ -85,6 +85,8 @@ impl Maze {
         let subway_row_offset = (crate::field::SIZE_Y - self.height) / 2;
         let subway_col_offset = (crate::field::SIZE_X - self.width) / 2;
 
+        let is_second_floor = self.marks.iter().all(|m| *m != Mark::Entrance);
+        subway.set_second_floor(is_second_floor);        
         subway.reset();
         for row in 0..self.height {
             for col in 0..self.width {
@@ -94,6 +96,7 @@ impl Maze {
                     match self.marks[grid_idx] {
                         Mark::Entrance => Cell::Entrance,
                         Mark::Treasury => Cell::Exit,
+                        Mark::Ladder if is_second_floor => Cell::Entrance,
                         _ => self.cells[grid_idx],
                     },
                 )

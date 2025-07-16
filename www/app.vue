@@ -53,6 +53,7 @@ function onHaveMaze(maze: Maze) {
         stField.cells[cell_id].cellType = stField.field.get_field(cell_id);
         stField.marks[cell_id] = maze.get_mark(cell_id);
     }
+    stField.isSecondFloor = stField.field.is_second_floor();
     stField.outerSweep();
     updateProbabilities();
 }
@@ -60,6 +61,19 @@ function onHaveMaze(maze: Maze) {
 function onMapLinkChange(evt: Event) {
     const request = (evt.currentTarget as HTMLInputElement).value;
     parseMap(request);
+}
+
+function updateFloor() {
+    let entranceCell = stField.cells.findIndex(c => c.cellType == Cell.Entrance);
+    if (entranceCell >= 0) {
+        if (stField.isSecondFloor) {
+            stField.clearByTypeAndMark(Cell.Pass, Mark.Ladder);
+            stField.setCell(entranceCell, Cell.Entrance, Mark.Ladder);
+        } else {
+            stField.setCell(entranceCell, Cell.Entrance, Mark.Entrance);
+        }
+    }
+    updateProbabilities();
 }
 
 function updateProbabilities() {
@@ -147,7 +161,7 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
     if (newValue == 0) {
         // reset
         stField.reset();
-    } else if (probes.value.findIndex(v => v.mark == Mark.Entrance) != -1 && newValue > 0) {
+    } else if (stField.hasEntrance() && newValue > 0) {
         // precondition ok
         if (false && newValue > oldValue) {
             // update -- numerically unstable?
@@ -184,6 +198,10 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
             <label>
                 <input type="checkbox" v-model="stField.isJumpy" @change="updateProbabilities()" />
                 Прыгучесть
+            </label>
+            <label>
+                <input type="checkbox" v-model="stField.isSecondFloor" @change="updateFloor()" />
+                Второй этаж
             </label>
         </div>
         <imagePaste @haveMaze="onHaveMaze"></imagePaste>
