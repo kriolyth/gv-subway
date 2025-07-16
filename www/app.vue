@@ -195,14 +195,10 @@ watch(() => stCalc.numSteps, (newValue, oldValue) => {
             </label>
         </div>
         <div id="specials">
-            <label>
-                <input type="checkbox" v-model="stField.isJumpy" @change="updateProbabilities()" />
-                Прыгучесть
-            </label>
-            <label>
-                <input type="checkbox" v-model="stField.isSecondFloor" @change="updateFloor()" />
-                Второй этаж
-            </label>
+            <input type="checkbox" id="jumpy" class="tgl" v-model="stField.isJumpy" @change="updateProbabilities()" />
+            <label for="jumpy" class="tgl-act">Прыгучесть: <span class="value" data-on="вкл" data-off="выкл"></span></label>
+            <input type="checkbox" id="secunda" class="tgl" v-model="stField.isSecondFloor" @change="updateFloor()" />
+            <label for="secunda" class="tgl-act">Этаж: <span class="value" data-on="второй" data-off="первый"></span></label>
         </div>
         <imagePaste @haveMaze="onHaveMaze"></imagePaste>
     </div>
@@ -218,9 +214,14 @@ h3 {
     margin-right: auto;
 }
 
-#calc,
-#specials {
+#calc {
     margin-top: 0.5em;
+}
+#specials {
+    margin-top: 1em;
+    display: grid;
+    grid-template-columns: repeat(3, 12em);
+    justify-items: start;
 }
 
 #numsteps {
@@ -243,4 +244,43 @@ h3 {
     width: 80%;
     margin-left: 1em;
 }
+
+.tgl {
+    display: none;
+}
+
+.tgl-act {
+    border: 1px solid silver;
+    padding: .25em .5em;
+}
+.tgl-act ~ .tgl-act {
+    margin: 0em 1em;
+}
+.tgl:checked + .tgl-act {
+    background-color: mediumspringgreen;
+}
+.tgl:checked + .tgl-act > .value::after {
+    content: attr(data-on);
+}
+.tgl:not(:checked) + .tgl-act > .value::after {
+    content: attr(data-off);
+}
+
+.tgl + .tgl-act::after, .tgl + .tgl-act::before {
+    content: "";
+    border: 1px solid black;
+    padding: 0.5em 0.24em;
+    position: relative;
+    visibility: hidden;
+    background: silver;
+}
+.tgl:checked + .tgl-act::after {
+    right: -0.75em;
+    visibility: visible;
+}
+.tgl:not(:checked) + .tgl-act::before {
+    left: -0.75em;
+    visibility: visible;
+}
+
 </style>
