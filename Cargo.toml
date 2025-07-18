@@ -36,4 +36,4 @@ panic = "abort"
 lto = true
 
 [package.metadata.wasm-pack.profile.release]
-wasm-opt = ["-O3"]
+wasm-opt = ["-O4", "--flexible-inline-max-function-size", "360", "--fast-math", "--reorder-functions", "--precompute", "--precompute-propagate"]

@@ -6,7 +6,7 @@ fn export_git_commit_count() {
         Ok(result) => result.parse().unwrap_or(0),
         Err(_) => {
             let output = Command::new("git")
-                .args(&["rev-list", "--count", "HEAD"])
+                .args(["rev-list", "--count", "HEAD"])
                 .output()
                 .expect("Failed to execute git command");
             String::from_utf8_lossy(&output.stdout).trim().parse::<u32>().unwrap_or(0)

@@ -1,19 +1,19 @@
 mod field;
 mod imga;
-mod brief;
 
 use wasm_bindgen::prelude::*;
 
 #[wasm_bindgen]
-pub fn get_version() -> String {
-    option_env!("PACKAGE_VERSION")
-        .unwrap_or("1.y")
-        .to_string()
+pub fn get_version() -> JsValue {
+    JsValue::from_str(
+        option_env!("PACKAGE_VERSION")
+            .unwrap_or("1.y")
+    )
 }
 
 #[wasm_bindgen]
-pub fn get_cookie_line() -> String {
-    const MESSAGES: [&'static str; 24] = [
+pub fn get_cookie_line() -> JsValue {
+    const MESSAGES: [&str; 24] = [
         "Вы слишком поздно пришли, и они закончились.",
         "Вы не представляете никакого интереса.",
         "Таков путь.",
@@ -40,6 +40,6 @@ pub fn get_cookie_line() -> String {
         "Сказка закончилась до вашего прихода.",
     ];
     let pick = (web_sys::js_sys::Math::random() * MESSAGES.len() as f64).trunc() as usize;
-    MESSAGES[pick].to_owned()
+    JsValue::from_str(MESSAGES[pick])
 }
 

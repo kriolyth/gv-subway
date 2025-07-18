@@ -13,7 +13,10 @@ module.exports = {
         filename: "bootstrap.js", // filename referenced in index.html
     },
     mode: 'production',
-
+    performance: {
+        hints: false,
+        maxAssetSize: 512000
+    },
     resolve: {
         extensions: ['.ts', '.js', '.wasm', '.vue'],
     },

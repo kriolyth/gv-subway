@@ -1,12 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use image::{imageops, DynamicImage, GenericImageView, Luma};
+use image::{imageops, DynamicImage, GenericImageView, GrayImage, Luma};
 use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
 use wasm_bindgen::prelude::*;
 
-use crate::brief::{center_mass, offset_point};
 use crate::field::{Cell, Coordinate, Subway};
 
 const NN_INPUT_SIZE: u32 = 12;
@@ -68,11 +67,16 @@ pub struct Maze {
     marks: Vec<Mark>,
 }
 
+impl Default for Maze {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[wasm_bindgen]
 impl Maze {
     pub fn new() -> Self {
         Self {
-            // grid: Grid::default(),
             width: 0,
             height: 0,
             cells: vec![],
@@ -227,9 +231,35 @@ impl CellDim {
     }
 }
 
+type Point = (i32, i32);
+
+fn offset_point(pt: Point, shift: Point) -> Point {
+    (pt.0 + shift.0, pt.1 + shift.1)
+}
+
+/// Calculate "center mass" of a binarized image,
+/// with dark pixels having more weight
+/// (dark pixels have most leasing zeros in binary representation)
+fn center_mass(img: &GrayImage) -> Point {
+    let total = img.enumerate_pixels().fold((0, 0, 0i32), |acc, en| {
+        let clr = 10 - ((en.2[0] as u16) * 3 + 1).ilog2().min(9);
+        let weight: i32 = (clr * clr) as i32;
+        (
+            acc.0 + en.0 as i32 * weight,
+            acc.1 + en.1 as i32 * weight,
+            acc.2 + weight,
+        )
+    });
+    if total.2 > 0 {
+        (total.0 / total.2, total.1 / total.2)
+    } else {
+        (img.width() as i32 / 2, img.height() as i32 / 2)
+    }
+}
+
 struct NimageProcessor {
     pub name: String,
-    pub source: image::DynamicImage,
+    pub source: DynamicImage,
     pub dark_mode: bool,
     pub seed_square: Option<CellDim>,
 }
@@ -245,7 +275,7 @@ impl NimageProcessor {
     const LEFT_SIDE: u8 = 0b11100000;
     const MIN_SIZE: u32 = 8;
 
-    fn get_seed_subimage(source: &image::DynamicImage) -> (image::GrayImage, u32, u32) {
+    fn get_seed_subimage(source: &DynamicImage) -> (GrayImage, u32, u32) {
         let window_size: u32 = source.width().min(source.height()) / 3;
         let offset_x = (source.width() - window_size) / 2;
         let offset_y = (source.height() - window_size) / 2;
@@ -253,12 +283,12 @@ impl NimageProcessor {
         (image::imageops::grayscale(&subview), offset_x, offset_y)
     }
 
-    fn detect_dark_mode(seed: &image::GrayImage) -> bool {
-        let avg_brightness = imageproc::stats::percentile(&seed, 50);
+    fn detect_dark_mode(seed: &GrayImage) -> bool {
+        let avg_brightness = imageproc::stats::percentile(seed, 50);
         avg_brightness < 128
     }
 
-    fn cell_full_search(bin_img: &image::GrayImage) -> Option<CellDim> {
+    fn cell_full_search(bin_img: &GrayImage) -> Option<CellDim> {
         enum State {
             SearchLT,
             SpanTopSide(u32, u32, u32),
@@ -308,7 +338,7 @@ impl NimageProcessor {
         }
     }
 
-    pub fn find_seed_square(seed: &image::GrayImage, dark_mode: bool) -> Option<CellDim> {        
+    pub fn find_seed_square(seed: &GrayImage, dark_mode: bool) -> Option<CellDim> {        
         let mid = imageproc::contrast::otsu_level(seed);
         let mut bin_img = imageproc::contrast::threshold(seed, mid,
             if !dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
@@ -327,7 +357,7 @@ impl NimageProcessor {
         Self::cell_full_search(&bin_img)
     }
 
-    pub fn new(name: &str, source: image::DynamicImage) -> Self {
+    pub fn new(name: &str, source: DynamicImage) -> Self {
         let (grey, x, y) = Self::get_seed_subimage(&source);
         let dark_mode = Self::detect_dark_mode(&grey);
         let mut seed_square = Self::find_seed_square(&grey, dark_mode);
@@ -347,7 +377,7 @@ impl NimageProcessor {
                     ExploreDirection::Up => (0, offset, int_img.width() - 2, offset),
                     ExploreDirection::Down => (0, int_img.height() - 2 - offset, int_img.width() - 2, int_img.height() - 2 - offset)
             };
-            let value = imageproc::integral_image::sum_image_pixels(&int_img, left, top, right, bottom).as_ref()[0] / 255;
+            let value = imageproc::integral_image::sum_image_pixels(int_img, left, top, right, bottom).as_ref()[0] / 255;
             if value <= 2 {
                 dip_offset = Some(match direction {
                     ExploreDirection::Left => offset + 1,
@@ -362,9 +392,9 @@ impl NimageProcessor {
         dip_offset
     }
 
-    fn scan_blank(img: &image::GrayImage, from_pt: (i32, i32), direction: ExploreDirection) -> (i32, i32) {
+    fn scan_blank(img: &GrayImage, from_pt: (i32, i32), direction: ExploreDirection) -> (i32, i32) {
         const WIDTH: i32 = 10;
-        let mut pt = (from_pt.0 as i32, from_pt.1 as i32);        
+        let mut pt = from_pt;
         let dir = match direction {
             ExploreDirection::Left => (-1, 0),
             ExploreDirection::Right  => (1, 0),
@@ -399,10 +429,10 @@ impl NimageProcessor {
         pt
     }
 
-    fn align_borders(&self, cell: &UnalignedCellDim, bin_img: &image::GrayImage) -> Option<CellDim> {
+    fn align_borders(&self, cell: &UnalignedCellDim, bin_img: &GrayImage) -> Option<CellDim> {
         let range = cell.width / 4;
 
-        let integral = imageproc::integral_image::integral_image::<_, u32>(&bin_img);
+        let integral = imageproc::integral_image::integral_image::<_, u32>(bin_img);
         let left = Self::find_inner_border_offset(&integral, ExploreDirection::Left, range);
         let right = Self::find_inner_border_offset(&integral, ExploreDirection::Right, range);
         let top = Self::find_inner_border_offset(&integral, ExploreDirection::Up, range);
@@ -426,7 +456,7 @@ impl NimageProcessor {
     pub fn align_cell(&self, cell: &UnalignedCellDim) -> Option<CellDim> {
         let max_rest_width = (self.source.width() - cell.x).min(cell.width);
         let max_rest_height = (self.source.height() - cell.y).min(cell.height);
-        if (max_rest_width < Self::MIN_SIZE) || (max_rest_width < Self::MIN_SIZE) { return None; }
+        if (max_rest_width < Self::MIN_SIZE) || (max_rest_height < Self::MIN_SIZE) { return None; }
 
         let subview = self.source.view(cell.x, cell.y, max_rest_width, max_rest_height).to_image();
         let grey = image::imageops::grayscale(&subview);
@@ -435,7 +465,7 @@ impl NimageProcessor {
         let bin_img = imageproc::contrast::threshold(&grey, mid,
             if !self.dark_mode { imageproc::contrast::ThresholdType::Binary } else { ThresholdType::BinaryInverted });
         
-        let mut result = self.align_borders(&cell, &bin_img)
+        let mut result = self.align_borders(cell, &bin_img)
             .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
 
         if result.is_none() {
@@ -443,14 +473,14 @@ impl NimageProcessor {
             if self.dark_mode {
                 imageops::invert(&mut ada_img);
             }
-            result = self.align_borders(&cell, &ada_img)
+            result = self.align_borders(cell, &ada_img)
                 .map(|c| CellDim{ x: c.x + cell.x, y: c.y + cell.y, width: c.width, height: c.height });
         }
 
         result
     }
 
-    pub fn extract_cell_image(&self, cell: &CellDim) -> image::GrayImage {
+    pub fn extract_cell_image(&self, cell: &CellDim) -> GrayImage {
         let mut img = imageops::grayscale(&self.source.view(cell.x+1, cell.y+1, cell.width-2, cell.height-2).to_image());
         if self.dark_mode {
             imageops::invert(&mut img);
@@ -458,8 +488,8 @@ impl NimageProcessor {
         img
     }
 
-    pub fn conform_image(img: &image::GrayImage) -> image::GrayImage {
-        let mut result = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
+    pub fn conform_image(input: &GrayImage) -> GrayImage {
+        let mut result = GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
 
         fn contrast(p: u8, min: u8, max: u8) -> u8 {
             if min == max { return u8::MAX };
@@ -472,8 +502,8 @@ impl NimageProcessor {
             (k * 255.0).round().clamp(u8::MIN as f32, u8::MAX as f32) as u8
         }
 
-        let mm = imageproc::stats::min_max(&img)[0];
-        let img = imageproc::map::map_pixels(img, |_x, _y, p| {
+        let mm = imageproc::stats::min_max(input)[0];
+        let img = imageproc::map::map_pixels(input, |_x, _y, p| {
             Luma::<u8>::from( [contrast(p.0[0], mm.min, mm.max)] )
         });
 
@@ -503,8 +533,8 @@ impl NimageProcessor {
     }
 
     /// Returns true if the image is mostly white (blank)
-    pub fn is_blank_image(img: &image::GrayImage) -> bool {
-        imageproc::stats::percentile(&img, 2) > 192 && imageproc::stats::min_max(&img)[0].min > 160
+    pub fn is_blank_image(img: &GrayImage) -> bool {
+        imageproc::stats::percentile(img, 2) > 192 && imageproc::stats::min_max(img)[0].min > 160
     }
 }
 
@@ -543,17 +573,20 @@ impl NTiler {
         let input = nalgebra::SVector::<f32, NN_IN_LAYER_SIZE>::from_vec(data);
         let middle = (self.mid_layer * input + self.mid_layer_bias).apply_into(tanh);
         let output = self.out_layer * middle + self.out_layer_bias;
-        softmax(&output).into_iter().map(|&v| v).collect()
+        softmax(&output).into_iter().copied().collect()
     }
 
-    pub fn predict(&self, data: &Vec<u8>) -> Option<usize> {
-        let nn_data: Vec<f32> = data.iter().map(|&p| p as f32 / 255. - 0.5).collect();
+    pub fn predict(&self, data: &[u8]) -> Option<usize> {
+        let mut nn_data = Vec::with_capacity(data.len());
+        for p in data {
+            nn_data.push(*p as f32 / 255. - 0.5);
+        }
 
         let result = self.forward(nn_data);
         let max = result.iter().enumerate().max_by(|&a, &b| { if a.1 < b.1 { Ordering::Less } else if a.1 == b.1 { Ordering::Equal } else { Ordering::Greater } }).unwrap();
 
         if *max.1 > 0.5 {
-            Some(max.0 as usize)
+            Some(max.0)
         } else {
             None
         }
@@ -564,11 +597,11 @@ impl NTiler {
         let params: Vec<Vec<Vec<f32>>> = bincode::borrow_decode_from_slice(weights, bincode::config::standard()).unwrap().0;
 
         let first_layer = params.first().unwrap();
-        self.mid_layer = nalgebra::SMatrix::from_iterator(first_layer.iter().flatten().map(|&v| v));
+        self.mid_layer = nalgebra::SMatrix::from_iterator(first_layer.iter().flatten().copied());
         self.mid_layer_bias = nalgebra::SVector::from_vec(first_layer.last().unwrap().clone());
 
         let second_layer = params.last().unwrap();
-        self.out_layer = nalgebra::SMatrix::from_iterator(second_layer.iter().flatten().map(|&v| v));
+        self.out_layer = nalgebra::SMatrix::from_iterator(second_layer.iter().flatten().copied());
         self.out_layer_bias = nalgebra::SVector::from_vec(second_layer.last().unwrap().clone());
     }
 }
@@ -643,7 +676,7 @@ impl Explorer {
     }
 
     pub fn visited(&self, position: &CellMazePos) -> bool {
-        self.queue.iter().find(|&&c| c.position == *position).is_some()
+        self.queue.iter().any(|&c| c.position == *position)
     }
 
     pub fn enqueue(&mut self, cell: ExploreCell) {
@@ -660,7 +693,7 @@ impl Explorer {
             (min_corner, max_corner)
         });
         let size = (max.0 - min.0 + 1, max.1 - min.1 + 1);
-        (size.0 as u8, size.1 as u8, min.0.into(), min.1.into())
+        (size.0 as u8, size.1 as u8, min.0, min.1)
     }
 
     pub fn print_layout(&self) {
@@ -694,7 +727,7 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
     // quick and dirty copy from JS into Rust
     unsafe { data.raw_copy_to_ptr(imgbuf.as_mut_ptr()); }
 
-    let proc = NimageProcessor::new("Хитро!", image::DynamicImage::from(imgbuf));
+    let proc = NimageProcessor::new("Хитро!", DynamicImage::from(imgbuf));
 
     if proc.seed_square.is_none() {
         web_sys::console::log_1(&"Не срослось".into());
@@ -743,7 +776,7 @@ pub fn get_maze(width: usize, height: usize, data: Uint8ClampedArray) -> Maze {
     // recognize the tiles
     expl.reset();
 
-    let mut cache = Vec::<(image::GrayImage, Cell, Mark)>::new();
+    let mut cache = Vec::<(GrayImage, Cell, Mark)>::new();
 
     let mut tiler = NTiler::new();
     tiler.load();
@@ -811,7 +844,6 @@ mod tests {
 
     use super::*;
     use image;
-    use wasm_bindgen_test::*;
 
     use jiro_nn::{model::network_model::NetworkModelBuilder};
     use jiro_nn::network::Network;
@@ -884,7 +916,7 @@ mod tests {
 
             // save the tiles
             expl.reset();
-            let mut cache = Vec::<image::GrayImage>::new();
+            let mut cache = Vec::<GrayImage>::new();
             let mut cache_hit: usize = 0;
             while let Some(cur) = expl.current() {
                 let sub = proc.extract_cell_image(&cur.cell);
@@ -945,7 +977,7 @@ mod tests {
                 let img = image::ImageReader::open(train_img.unwrap().path()).unwrap().decode().unwrap();
                 let img = imageops::grayscale(&img);
                 let bgcolour = imageproc::stats::percentile(&img, 95);
-                let mut shimg  = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
+                let mut shimg  = GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
 
                 for jitter_x in -2..=1i64 {
                     for jitter_y in -1..=1i64 {
@@ -1022,7 +1054,7 @@ mod tests {
 
                 for jitter_x in -1..=1i64 {
                     for jitter_y in -0..=0i64 {
-                        let mut shimg  = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
+                        let mut shimg  = GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
                         shimg.fill(bgcolour);
                         imageops::overlay(&mut shimg, &img, jitter_x, jitter_y);
 
