@@ -6,6 +6,10 @@ const DEFAULT_BRIEF_LENGTH: usize = 192;
 
 pub type Point = (i32, i32);
 
+pub fn offset_point(pt: Point, shift: Point) -> Point {
+    (pt.0 + shift.0, pt.1 + shift.1)
+}
+
 /// BRIEF descriptor
 #[derive(Default)]
 pub struct Brief {
