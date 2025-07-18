@@ -6,7 +6,7 @@ use imageproc::contrast::ThresholdType;
 use js_sys::Uint8ClampedArray;
 use wasm_bindgen::prelude::*;
 
-use crate::brief::center_mass;
+use crate::brief::{center_mass, offset_point};
 use crate::field::{Cell, Coordinate, Subway};
 
 const NN_INPUT_SIZE: u32 = 12;
@@ -489,10 +489,10 @@ impl NimageProcessor {
         // imageops::overlay(&mut result, &img, x, y);
 
         // Variant with resize:
-        let left = Self::scan_blank(&img, centroid, ExploreDirection::Left).0 + 1;
-        let right = Self::scan_blank(&img, centroid, ExploreDirection::Right).0;
-        let top = Self::scan_blank(&img, centroid, ExploreDirection::Up).1 + 1;
-        let bottom = Self::scan_blank(&img, centroid, ExploreDirection::Down).1;
+        let left = Self::scan_blank(&img, offset_point(centroid, (-2, 0)), ExploreDirection::Left).0 + 1;
+        let right = Self::scan_blank(&img, offset_point(centroid, (2, 0)), ExploreDirection::Right).0;
+        let top = Self::scan_blank(&img, offset_point(centroid, (0, -1)), ExploreDirection::Up).1 + 1;
+        let bottom = Self::scan_blank(&img, offset_point(centroid, (0, 1)), ExploreDirection::Down).1;
 
         let focus_img = DynamicImage::resize(&DynamicImage::ImageLuma8(img.view(left as u32, top as u32, (right - left) as u32, (bottom - top) as u32).to_image()),
             NN_INPUT_SIZE, NN_INPUT_SIZE, imageops::FilterType::CatmullRom);
@@ -942,23 +942,20 @@ mod tests {
             classifier_vec[class] = 1.0;
 
             for train_img in std::fs::read_dir(class_dir.as_ref().unwrap().path()).unwrap() {
-                let mut data_vec = Vec::<f32>::new();
-                data_vec.reserve((NN_INPUT_SIZE * NN_INPUT_SIZE) as usize);
                 let img = image::ImageReader::open(train_img.unwrap().path()).unwrap().decode().unwrap();
                 let img = imageops::grayscale(&img);
+                let bgcolour = imageproc::stats::percentile(&img, 95);
+                let mut shimg  = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
 
-                for p in img.pixels().map(|p| p.0[0]) {
-                    data_vec.push(p as f32 / 255.0 - 0.5);
-                }
+                for jitter_x in -2..=1i64 {
+                    for jitter_y in -1..=1i64 {
+                        shimg.fill(bgcolour);
+                        imageops::overlay(&mut shimg, &img, jitter_x, jitter_y);
 
-                for jitter_x in -1..=1i32 {
-                    for jitter_y in -0..=0i32 {
-                        let mut dv = data_vec.clone();
-                        let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
-                        if shift < 0 {
-                            dv.rotate_left(-shift as usize);
-                        } else {
-                            dv.rotate_right(shift as usize);
+                        let mut dv = Vec::<f32>::new();
+                        dv.reserve((NN_INPUT_SIZE * NN_INPUT_SIZE) as usize);
+                        for p in shimg.pixels().map(|p| p.0[0]) {
+                            dv.push(p as f32 / 255.0 - 0.5);
                         }
 
                         train_in.push(dv.clone());
@@ -976,9 +973,10 @@ mod tests {
         let mut network = make_network_model();
 
         let loss = Losses::BCE.to_loss();
-        let batch_size = 2048;
 
-        for epoch in 0..16000 {
+        for epoch in 0..5000 {
+            let batch_size = if epoch < 1000 { 96 } else { 2048 };
+
             let error = network.train(
                 epoch,
                 &train_in,
@@ -989,6 +987,10 @@ mod tests {
 
             if epoch % 25 == 0 {
                 println!("Epoch: {} Average training loss: {}", epoch, error);
+            }
+            if error < 5e-6 {
+                println!("Epoch: {} Average training loss: {}, limit reached", epoch, error);
+                break;
             }
         }
 
@@ -1016,17 +1018,15 @@ mod tests {
             for test_img in std::fs::read_dir(class_dir.as_ref().unwrap().path()).unwrap() {
                 let img = image::ImageReader::open(test_img.as_ref().unwrap().path()).unwrap().decode().unwrap();
                 let img = imageops::grayscale(&img);
+                let bgcolour = imageproc::stats::percentile(&img, 95);
 
-                let img_v = img.into_vec();
-                for jitter_x in -1..=1i32 {
-                    for jitter_y in -0..=0i32 {
-                        let mut v = img_v.clone();
-                        let shift: i32 = jitter_y * (NN_INPUT_SIZE as i32) + jitter_x;
-                        if shift < 0 {
-                            v.rotate_left(-shift as usize);
-                        } else {
-                            v.rotate_right(shift as usize);
-                        }
+                for jitter_x in -1..=1i64 {
+                    for jitter_y in -0..=0i64 {
+                        let mut shimg  = image::GrayImage::new(NN_INPUT_SIZE, NN_INPUT_SIZE);
+                        shimg.fill(bgcolour);
+                        imageops::overlay(&mut shimg, &img, jitter_x, jitter_y);
+
+                        let v = shimg.into_vec();
                         let pred = tiler.predict(&v);
                         if Some(class) != pred {
                             println!("Mismatch: {} as {:?} (jitter {jitter_x}, {jitter_y})", test_img.as_ref().unwrap().path().to_string_lossy(), pred);
